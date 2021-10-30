@@ -1,0 +1,3 @@
+sample_id,vdj_contig_info,donor,origin
+Ctrl,../../vdj/Ctrl_tcr/outs/vdj_contig_info.pb,pt26,Ctrl
+IE1,../../vdj/IE1_tcr/outs/vdj_contig_info.pb,pt26,IE1

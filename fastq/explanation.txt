@@ -1,0 +1,26 @@
+# Explanation of barcode in reads
+
+I1 and I2 files just contain the Illumina index i7 and i5 barcodes.
+
+R1 file contains 10x bead barcode and unique molecular identifier (UMI)
+
+10 nt 10x barcode: unique for each bead (hopefully, cell)
+16 nt UMI: unqiue for each RNA molecule
+
+Example data from a R1 fastq file (extra spaces are inserted for clarity):
+
+@A00431:243:HTKV7DSXY:1:1101:1271:1000 1:N:0:GTAGACGAAA+ACCACACTAG
+NAAGGCCGTC TAGGTTTAATAAAGGC
++
+#FFFFFFFFF FF:FFFFFFFFFFF:F
+
+@A00431:243:HTKV7DSXY:1:1101:1542:1000 1:N:0:GTAGACGAAA+ACCACACTAG
+NTTGGTTAGC TGAAATCTCGTTTAAT
++
+#FFFFFFFFF FFFFFFFFFFFFFFFF
+
+R1 fastq contains cell barcode and UMI; not used in alignment
+R2 fastq contains the mRNA insert; used in alignment
+
+Library type is probably SC5P-R2
+

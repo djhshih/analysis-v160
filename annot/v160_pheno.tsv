@@ -1,0 +1,5 @@
+id	external_id	description	stimulation	library_type	fastq_r1	fastq_r2
+IE1_5p	ZX_22996	10x5v2_IE1_S_library	IE1	5p	ZX_22996_S1_L001_R1_001.fastq.gz	ZX_22996_S1_L001_R2_001.fastq.gz
+Ctrl_5p	ZX_22997	10x5v2_IE1_PP65N_library	none	5p	ZX_22997_S2_L001_R1_001.fastq.gz	ZX_22997_S2_L001_R2_001.fastq.gz
+IE1_tcr	ZX_22998	10x5v2_IE1_S hTCR library	IE1	tcr	ZX_22998_S3_L001_R1_001.fastq.gz	ZX_22998_S3_L001_R2_001.fastq.gz
+Ctrl_tcr	ZX_22999	10x5v2_IE1_PP65N hTCR library	none	tcr	ZX_22999_S4_L001_R1_001.fastq.gz	ZX_22999_S4_L001_R2_001.fastq.gz
