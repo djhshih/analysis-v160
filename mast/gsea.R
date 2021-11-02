@@ -7,6 +7,8 @@ library(MAST)
 library(io)
 library(limma)
 library(viridis)
+library(ggplot2)
+library(RColorBrewer)
 
 options(mc.cores=120)
 
@@ -28,7 +30,7 @@ if (file.exists(tag(boots.fn)) {
 
 module <- "BTM";
 module.min.genes <- 5;
-fdr.cut <- 0.10;
+fdr.cut <- 0.05;
 
 module.fn <- list.files(system.file("extdata", package="MAST"), pattern = module, full.names = TRUE);
 gsets <- getGmt(module.fn);
@@ -37,24 +39,20 @@ gids <- geneIds(gsets);
 # remove gene sets that are unknown (TBA)
 # remove gene sets pertaining to non-T cells
 gids <- gids[
-	! names(gids) %like% "B cell" &
-	! names(gids) %like% "neutrophil" &
-	! names(gids) %like% "NK cell" &
-	! names(gids) %like% "monocyte" &
-	! names(gids) %like% "myeloid cell" &
-	! names(gids) %like% "dendritic cell" &
-	! names(gids) %like% "TBA"
+	grep("(B cell)|(plasma cell)|(neutrophil)|(NK cell)|(monocyte)|(myeloid cell)|(dendritic cell)|(DC)|(TBA)",
+		names(gids), invert=TRUE, ignore.case=TRUE
+	)
 ];
 
 indices <- limma::ids2indices(gids, mcold$Symbol);
 # filter based on number of genes in modules
-indices <- indices[sappy(indices, length) >= module.min.genes];
+indices <- indices[sapply(indices, length) >= module.min.genes];
 
 
 hypotheses <- list(
-	durable = Hypothesis("responsedurable", c("(Intercept)", "responsedurable")),
-	transient = Hypothesis("responsetransient", c("(Intercept)", "responsetransient")),
-	durable.vs.transient = Hypothesis("responsedurable-responsetransient", c("responsetransient", "responsedurable"))
+	durable = CoefficientHypothesis("responsedurable", c("(Intercept)", "responsedurable")),
+	transient = CoefficientHypothesis("responsetransient", c("(Intercept)", "responsetransient"))
+	#durable.vs.transient = CoefficientHypothesis("responsedurable-responsetransient", c("responsetransient", "responsedurable"))
 );
 
 gseas <- lapply(hypotheses,
@@ -67,18 +65,32 @@ sms <- lapply(gseas, function(gsea) summary(gsea, testType="normal"));
 
 res.ds <- lapply(sms, function(sm) {
 	sigs <- sm[p.adjust(combined_adj, "BH") < fdr.cut];
-	melt(sigs[, .(set, disc_Z, cont_Z, combined_Z)], id.vars="set")
+	data.table::melt(sigs[, .(set, disc_Z, cont_Z, combined_Z)], id.vars="set")
 })
 
-m_plot_gsea <- function(res.d, fn) {
-	qdraw(
-		ggplot(res.d, aes(y=set, x=variable, fill=value)) + theme_classic() +
-			geom_raster() + scale_fill_viridis()
-		file = fn
+
+bound <- function(xs, lim) {
+	ifelse(xs < lim[1], lim[1],
+		ifelse(xs > lim[2], lim[2], xs)
 	)
 }
 
-for (contrast in names(hypotheses)) {
-	m_plot_gsea(res.ds[[contrast]], insert(pdf.fn, c("gsea", contrast)))
+m_plot_gsea <- function(res.d, ...) {
+	res.d$variable <- factor(res.d$variable, levels=c("disc_Z", "cont_Z", "combined_Z"),
+		labels=c("discrete", "continuous", "combined"));
+	qdraw(
+		ggplot(res.d, aes(y=set, x=variable, fill=bound(value, c(-12, 12)))) + theme_classic() +
+			geom_tile() + 
+			#scale_fill_gradientn(colours=brewer.pal(7, "BrBG"), name="", limits=c(-12, 12)) +
+			scale_fill_viridis(name="", option="mako", limits=c(-12, 12)) +
+			theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1)) +
+			theme(legend.position="bottom") +
+			xlab("") + ylab("")
+		,
+		...
+	)
 }
+
+m_plot_gsea(res.ds$durable, file=insert(pdf.fn, c("gsea", "durable")), width=5.5, height=13)
+m_plot_gsea(res.ds$transient, file=insert(pdf.fn, c("gsea", "transient")), width=4.9, height=4.7)
 

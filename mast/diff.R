@@ -1,10 +1,6 @@
-library(DropletUtils)
 library(io)
-library(scuttle)  # logNormCounts
 library(MAST)
-library(dplyr)
 
-indir <- "../aggr/5p/pt26/outs/count"
 
 options(mc.cores=128);
 
@@ -12,54 +8,15 @@ set.seed(1334);
 
 fdr.cut <- 0.05;
 
+in.fn <- "v160_sca.rds";
 
-out.fn <- filename("v160");
+out.fn <- as.filename(in.fn);
+out.fn$tag <- setdiff(out.fn$tag, "sca");
+
 rds.fn <- insert(out.fn, ext="rds");
 pdf.fn <- insert(out.fn, ext="pdf");
 
-barcode.d <- qread("../../tcr-profiling/tcr/merged/tcr_aggr_responsive_barcodes.csv");
-
-x <- read10xCounts(file.path(indir, "filtered_feature_bc_matrix"));
-
-br <- barcodeRanks(counts(x));
-
-qdraw(
-	{
-		with(br, plot(rank, total, log="xy", xlab="Rank", ylab="Total", pch='.'))
-		idx <- order(br$rank);
-		with(br, lines(rank[idx], fitted[idx], col="red"))
-		abline(h=metadata(br)$knee, col="dodgerblue", lty=2)
-		abline(h=metadata(br)$inflection, col="forestgreen", lty=2)
-		legend("bottomleft", lty=2, col=c("dodgerblue", "forestgreen"),
-			legend=c("knee", "inflection"))
-	},
-	file = insert(pdf.fn, "barcode-rank-plot")
-);
-
-# Remove empty droplets
-# However, empty droplets have already been removed
-#empty <- emptyDrops(counts(x));
-
-# Remove entries that are due to barcode swapping
-# However, it is unclear whether the aggregated sample have barcode swapping effects
-# removed.
-#info.paths <- c(
-#	"../count/Ctrl_5p/outs/molecule_info.h5",
-#	"../count/IE1_5p/outs/molecule_info.h5"
-#);
-#swapped <- swappedDrops(info.paths, min.frac=0.9, get.swapped=TRUE, get.diagnostics=TRUE);
-
-# convert to SingellCellAssay for use with MAST
-sca <- SceToSingleCellAssay(logNormCounts(x));
-
-cold <- left_join(as.data.frame(colData(sca)), barcode.d, by=c("Barcode"="barcode"));
-cold$response[is.na(cold$response)] <- "nonresponsive";
-cold$response <- factor(cold$response, c("nonresponsive", "transient", "durable"));
-
-colData(sca) <- DataFrame(cold);
-
-mcold <- data.table::as.data.table(mcols(sca));
-qwrite(mcold, insert(rds.fn, "features"));
+sca <- qread(in.fn);
 
 zfit <- zlm(~ response, sca);
 qwrite(zfit, insert(rds.fn, "mast-zlm"));
