@@ -8,11 +8,10 @@ set.seed(1334);
 
 fdr.cut <- 0.05;
 
-in.fn <- "v160_sca.rds";
+in.fn <- as.filename("v160_sca.rds");
+mcold <- qread("v160_features.rds");
 
-out.fn <- as.filename(in.fn);
-out.fn$tag <- setdiff(out.fn$tag, "sca");
-
+out.fn <- filename(in.fn$fstem, tag=setdiff(in.fn$tag, "sca"));
 rds.fn <- insert(out.fn, ext="rds");
 pdf.fn <- insert(out.fn, ext="pdf");
 
@@ -56,7 +55,7 @@ extract_sig_genes <- function(res, component="hurdle", fdr.cut=0.05, symbol=TRUE
 	qs <- p.adjust(ps, "BH");
 
 	idx <- qs < fdr.cut;
-	sigs <- names(hurdle.qs)[idx]
+	sigs <- names(qs)[idx]
 	if (symbol) {
 		pid_to_genes(sigs)
 	} else {
@@ -76,7 +75,7 @@ compare_sets <- function(xs) {
 }
 
 sgenes.wd <- list(
-	durable = durable <- extract_sig_genes(wd$durable),
+	durable = extract_sig_genes(wd$durable),
 	transient = extract_sig_genes(wd$transient),
 	durable.vs.transient = extract_sig_genes(wd$durable.vs.transient)
 );

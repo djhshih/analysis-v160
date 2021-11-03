@@ -9,20 +9,26 @@ library(limma)
 library(viridis)
 library(ggplot2)
 library(RColorBrewer)
+library(dplyr)
+
+source("R/common.R")
 
 options(mc.cores=120)
 
 
-zfit <- qread("v160_mast-zlm.rds");
+
+in.fn <- as.filename("v160_mast-zlm.rds");
+zfit <- qread(in.fn);
 mcold <- qread("v160_features.rds");
 
-out.fn <- filename("v160");
+out.fn <- filename(in.fn$fstem, tag=setdiff(in.fn$tag, "mast-zlm"));
 rds.fn <- insert(out.fn, ext="rds");
 pdf.fn <- insert(out.fn, ext="pdf");
 boots.fn <- insert(rds.fn, c("mast-zlm", "boots"));
 
-if (file.exists(tag(boots.fn)) {
+if (file.exists(tag(boots.fn))) {
 	boots <- qread(boots.fn);
+	message("Using cached data from ", tag(boots.fn));
 } else {
 	boots <- bootVcov1(zfit, R=100);
 	qwrite(boots, boots.fn);
@@ -30,7 +36,7 @@ if (file.exists(tag(boots.fn)) {
 
 module <- "BTM";
 module.min.genes <- 5;
-fdr.cut <- 0.05;
+fdr.cut <- 0.01;
 
 module.fn <- list.files(system.file("extdata", package="MAST"), pattern = module, full.names = TRUE);
 gsets <- getGmt(module.fn);
@@ -52,7 +58,6 @@ indices <- indices[sapply(indices, length) >= module.min.genes];
 hypotheses <- list(
 	durable = CoefficientHypothesis("responsedurable", c("(Intercept)", "responsedurable")),
 	transient = CoefficientHypothesis("responsetransient", c("(Intercept)", "responsetransient"))
-	#durable.vs.transient = CoefficientHypothesis("responsedurable-responsetransient", c("responsetransient", "responsedurable"))
 );
 
 gseas <- lapply(hypotheses,
@@ -63,34 +68,39 @@ gseas <- lapply(hypotheses,
 
 sms <- lapply(gseas, function(gsea) summary(gsea, testType="normal"));
 
-res.ds <- lapply(sms, function(sm) {
-	sigs <- sm[p.adjust(combined_adj, "BH") < fdr.cut];
-	data.table::melt(sigs[, .(set, disc_Z, cont_Z, combined_Z)], id.vars="set")
-})
+sig.sets <- lapply(sms, function(sm) {
+	filter(sm, combined_adj < fdr.cut, abs(combined_Z) > 3)$set
+});
 
+sm <- do.call(rbind, mapply(
+	function(sm, response) {
+		select(sm, set, disc_effect, combined_Z, combined_P, combined_adj) %>%
+			mutate(group = response)
+	}
+	,
+	sms,
+	names(sms),
+	SIMPLIFY = FALSE
+));
 
-bound <- function(xs, lim) {
-	ifelse(xs < lim[1], lim[1],
-		ifelse(xs > lim[2], lim[2], xs)
-	)
-}
+# summary for sets that are significant in any group
+sig.sm <- filter(sm,
+	set %in% unlist(sig.sets)
+);
 
-m_plot_gsea <- function(res.d, ...) {
-	res.d$variable <- factor(res.d$variable, levels=c("disc_Z", "cont_Z", "combined_Z"),
-		labels=c("discrete", "continuous", "combined"));
-	qdraw(
-		ggplot(res.d, aes(y=set, x=variable, fill=bound(value, c(-12, 12)))) + theme_classic() +
-			geom_tile() + 
-			#scale_fill_gradientn(colours=brewer.pal(7, "BrBG"), name="", limits=c(-12, 12)) +
-			scale_fill_viridis(name="", option="mako", limits=c(-12, 12)) +
-			theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1)) +
-			theme(legend.position="bottom") +
-			xlab("") + ylab("")
-		,
-		...
-	)
-}
+# order set by combined_Z
+sig.sm$set <- factor(sig.sm$set, levels=c(unique(sms$durable$set[order(sms$durable$combined_Z)])));
 
-m_plot_gsea(res.ds$durable, file=insert(pdf.fn, c("gsea", "durable")), width=5.5, height=13)
-m_plot_gsea(res.ds$transient, file=insert(pdf.fn, c("gsea", "transient")), width=4.9, height=4.7)
+qdraw(
+	ggplot(sig.sm, aes(y=set, x=group, fill=bound(combined_Z, c(-12, 12)))) + theme_classic() +
+		geom_tile() + 
+		scale_fill_viridis(name="", option="mako", limits=c(-12, 12)) +
+		theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1)) +
+		theme(legend.position="bottom") +
+		coord_fixed() +
+		xlab("") + ylab("")
+	,
+	width=6, height=10,
+	file=insert(pdf.fn, c("gsea"))
+);
 

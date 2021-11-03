@@ -11,9 +11,6 @@ options(mc.cores=100);
 
 set.seed(1334);
 
-fdr.cut <- 0.05;
-
-
 out.fn <- filename("v160");
 rds.fn <- insert(out.fn, ext="rds");
 pdf.fn <- insert(out.fn, ext="pdf");
@@ -84,6 +81,7 @@ qdraw(
 #);
 #swapped <- swappedDrops(info.paths, min.frac=0.9, get.swapped=TRUE, get.diagnostics=TRUE);
 
+
 # convert to SingellCellAssay for use with MAST
 sca <- SceToSingleCellAssay(logNormCounts(x.f));
 
@@ -91,6 +89,7 @@ cold <- left_join(as.data.frame(colData(sca)), barcode.d, by=c("Barcode"="barcod
 cold$response[is.na(cold$response)] <- "nonresponsive";
 cold$response <- factor(cold$response, c("nonresponsive", "transient", "durable"));
 
+mcold <- data.table::as.data.table(mcols(sca));
 
 
 # --- T cells
@@ -131,6 +130,8 @@ with(d.t.cells, cor(CD8A, CD8B))
 with(d.t.cells, fisher.test(table(CD8A, CD8B)))
 
 with(d.t.cells, table(CD4, CD8A | CD8B))
+with(d.t.cells, prop.table(table(CD4, CD8A | CD8B), 1))
+with(d.t.cells, prop.table(table(CD4, CD8A | CD8B), 2))
 with(d.t.cells, cor(CD4, CD8A | CD8B))
 with(d.t.cells, fisher.test(table(CD4, CD8A | CD8B)))
 
@@ -204,24 +205,96 @@ cold$t_cell[!known.cells] <- as.character(pred);
 
 print(with(cold, table(t_cell0, response)))
 print(with(cold, table(t_cell, response)))
+print(with(cold, prop.table(table(t_cell, response), 1)))
 
-print(with(cold, prop.table(table(t_cell, response)[, -1], 2)))
+print(with(cold, table(t_cell, response)[, -1]))
 print(with(cold, prop.table(table(t_cell, response)[, -1], 1)))
 print(with(cold, fisher.test(table(t_cell, response)[, -1])))
 # odds ratio = 50.07384
 # p-value = 4.937e-15
 
+library(binom)
+library(ggplot2)
+library(ggsci)
+
+response.p <- with(cold, fisher.test(table(t_cell, response != "nonresponsive"))$p.value);
+
+cold.s <- split(cold, cold$t_cell);
+response.d <- do.call(rbind, mapply(
+	function(d, cell) {
+		tt <- table(d$response != "nonresponsive");
+		names(tt) <- c("nonresponsive", "responsive");
+		data.frame(
+			binom.confint(tt, sum(tt), method="agresti-coull"),
+			response = names(tt),
+			t_cell = cell
+		)
+	},
+	cold.s,
+	names(cold.s),
+	SIMPLIFY = FALSE
+));
+
+qdraw(
+	ggplot(filter(response.d, response == "responsive"), aes(x=t_cell, y=mean * 100, ymin=lower * 100, ymax=upper * 100, colour=t_cell)) +
+		theme_classic() +
+		geom_point() +
+		geom_errorbar(width=0.3) +
+		scale_y_log10() +
+		scale_colour_npg() +
+		xlab("") + ylab("% responsive cells") + 
+		guides(colour="none") +
+		ggtitle(sprintf("p = %s", format(response.p, digits=2)))
+	,
+	width = 2, height = 3,
+	file = insert(pdf.fn, c("prop", "t-cell", "response"))
+)
+
+
+responset.p <- with(cold, fisher.test(table(t_cell, response)[, -1])$p.value);
+
+responset.d <- do.call(rbind, mapply(
+	function(d, cell) {
+		tt <- table(d$response)[-1];
+		data.frame(
+			binom.confint(tt, sum(tt), method="agresti-coull"),
+			response = names(tt),
+			t_cell = cell
+		)
+	},
+	cold.s,
+	names(cold.s),
+	SIMPLIFY = FALSE
+));
+
+qdraw(
+	ggplot(responset.d, aes(x=response, y=mean, ymin=lower, ymax=upper, fill=t_cell)) +
+		theme_classic() +
+		geom_col(position=position_dodge()) + 
+		geom_errorbar(position=position_dodge(width=0.9), aes(group=t_cell), width=0.3) +
+		scale_fill_npg(name="") +
+		xlab("") + ylab("proportion") + 
+		ggtitle(sprintf("p = %s", format(responset.p, digits=2)))
+	,
+	width = 3, height = 3,
+	file = insert(pdf.fn, c("prop", "t-cell", "response-type"))
+)
+
 # --- End T cells
 
 colData(sca) <- DataFrame(cold);
+qwrite(cold, insert(rds.fn, "cells"));
+
+colData(x.f) <- DataFrame(cold);
+qwrite(x.f, insert(rds.fn, "sce"));
 
 sca.cd4 <- sca[, cold$t_cell == "CD4"];
 sca.cd8 <- sca[, cold$t_cell == "CD8"];
 
-mcold <- data.table::as.data.table(mcols(sca));
 qwrite(mcold, insert(rds.fn, "features"));
 
 qwrite(sca, insert(rds.fn, "sca"));
 qwrite(sca.cd4, insert(rds.fn, c("sca", "cd4")));
 qwrite(sca.cd8, insert(rds.fn, c("sca", "cd8")));
+
 
