@@ -23,6 +23,7 @@ mcold <- qread("v160_features.rds");
 out.fn <- filename(in.fn$fstem, tag=setdiff(in.fn$tag, "mast-zlm"));
 rds.fn <- insert(out.fn, ext="rds");
 pdf.fn <- insert(out.fn, ext="pdf");
+png.fn <- insert(out.fn, ext="png");
 boots.fn <- insert(rds.fn, c("mast-zlm", "boots"));
 
 if (file.exists(tag(boots.fn))) {
@@ -100,6 +101,6 @@ qdraw(
 		xlab("") + ylab("")
 	,
 	width=6, height=10,
-	file=insert(pdf.fn, c("gsea"))
+	file=insert(png.fn, c("gsea"))
 );
 
