@@ -5,6 +5,8 @@ library(ggplot2)
 library(ggsci)
 library(viridis)
 
+source("R/common.R");
+
 options(mc.cores=128);
 
 set.seed(1334);
@@ -26,9 +28,6 @@ sce.r <- sce[, colData(sce)$response != "nonresponsive"];
 sce.r <- runUMAP(sce.r);
 sce.r <- runTSNE(sce.r);
 
-cols.response <- pal_jama()(3);
-names(cols.response) <- levels(colData(sce)$response);
-
 alpha <- 0.5;
 
 qdraw(
@@ -38,7 +37,7 @@ qdraw(
 		geom_point(size=0.5, alpha=alpha) +
 		#stat_density_2d() +
 		coord_fixed() +
-		scale_colour_manual(values = cols) +
+		scale_colour_manual(values = cols.response) +
 		theme(legend.position="bottom")
 	,
 	width = 6, height = 12,
@@ -52,7 +51,7 @@ qdraw(
 		geom_point(size=0.5, alpha=alpha) +
 		#stat_density_2d() +
 		coord_fixed() +
-		scale_colour_manual(values = cols) +
+		scale_colour_manual(values = cols.response) +
 		theme(legend.position="bottom")
 	,
 	width = 6, height = 12,
@@ -66,7 +65,7 @@ qdraw(
 		facet_wrap(~ t_cell) +
 		geom_point(alpha=alpha) +
 		coord_fixed() +
-		scale_colour_manual(values = cols) +
+		scale_colour_manual(values = cols.response) +
 		theme(legend.position="bottom")
 	,
 	width = 6,
@@ -79,7 +78,7 @@ qdraw(
 		facet_wrap(~ t_cell0) +
 		geom_point(alpha=alpha) +
 		coord_fixed() +
-		scale_colour_manual(values = cols) +
+		scale_colour_manual(values = cols.response) +
 		theme(legend.position="bottom")
 	,
 	width = 9,
@@ -182,7 +181,7 @@ qdraw(
 		facet_wrap(~ t_cell) +
 		geom_point(alpha=alpha) +
 		coord_fixed() +
-		scale_colour_manual(values = cols) +
+		scale_colour_manual(values = cols.response) +
 		theme(legend.position="bottom")
 	,
 	width = 6,
@@ -195,7 +194,7 @@ qdraw(
 		facet_wrap(~ t_cell0) +
 		geom_point(alpha=alpha) +
 		coord_fixed() +
-		scale_colour_manual(values = cols) +
+		scale_colour_manual(values = cols.response) +
 		theme(legend.position="bottom")
 	,
 	width = 9,
