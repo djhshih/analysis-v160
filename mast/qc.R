@@ -3,24 +3,91 @@ library(io)
 library(scuttle)  # logNormCounts
 library(MAST)
 library(dplyr)
-#library(miQC)  # requires Bioconductor 3.14 and R 4.1
+library(randomForest)
+library(scran)
+library(miQC)  # requires Bioconductor 3.14 and R 4.1
+library(scater)
+library(binom)
+library(ggplot2)
+library(ggsci)
 
-indir <- "../aggr/5p/pt26/outs/count"
+
+source("R/common.R")
+
 
 options(mc.cores=100);
 
-set.seed(1334);
+set.seed(1337);
+
+
+m_fix_table <- function(d) {
+	d$label <- factor(d$label, levels=sort(as.integer(unique(d$label))));
+
+	d$lower <- pmax(0, d$lower);
+	d$upper <- pmin(1, d$upper);
+
+	d$response <- factor(d$response, levels=levels.response);
+
+	d
+}
+
+mod_rd_plot <- function(g) {
+	g + theme(legend.position="bottom", legend.box = "horizontal") + coord_fixed()
+}
+
+revlog_trans <- function(base = 10) {
+	library(scales)
+	trans <- function(x) -log(x, base)
+	inv <- function(x) base^(-x)
+	trans_new(
+		paste0("revlog-", format(base)), trans, inv,
+		log_breaks(base = base), 
+		domain = c(1e-100, Inf)
+	)
+}
+
+
+indir <- "../aggr/5p/pt26/outs/count"
 
 out.fn <- filename("v160");
 rds.fn <- insert(out.fn, ext="rds");
 pdf.fn <- insert(out.fn, ext="pdf");
 
 barcode.d <- qread("../../tcr-profiling/tcr/merged/tcr_aggr_responsive_barcodes.csv");
+base.gset <- read.table("../annot/gset/gobp_immune_response.grp", skip=2)[,1];
+tact.gset <- read.table("../annot/gset/gobp_t_cell_activation.grp", skip=2)[,1];
+pbmc.markers.d <- qread("../annot/pbmc_markers.csv");
+tmem.markers.d <- qread("../annot/t-mem_markers.tsv");
 
 x <- read10xCounts(file.path(indir, "filtered_feature_bc_matrix"));
+mcold <- DataFrame(rowData(x));
+
+# sort by ensembl ID
+# so that the earlier entry will be used when we match on gene symbol
+#ens.order.idx <- order(rowData(x)$ID);
+
+# deal with duplicate gene symbol entries
+dup.idx <- which(duplicated(rowData(x)$Symbol));
+cat("Duplicated gene symbols:\n")
+print(rowData(x)$Symbol[dup.idx])
+rowData(x)$Symbol[dup.idx] <- paste(rowData(x)$Symbol[dup.idx], rowData(x)$ID[dup.idx], sep="_")
+
+mcold <- DataFrame(rowData(x));
+rownames(x) <- mcold$Symbol;
+
+tcell.gset <- unique(sort(c(
+	tact.gset,
+	pbmc.markers.d$gene_symbol[pbmc.markers.d$cell_type == "T cell"],
+	tmem.markers.d$gene_symbol
+)));
+
+base.gset.idx <- na.omit(match(base.gset, mcold$Symbol));
+tcell.gset.idx <- na.omit(match(tcell.gset, mcold$Symbol));
+tmem.gset.idx <- na.omit(match(tmem.markers.d$gene_symbol, mcold$Symbol));
 
 # There are no spike-ins
-grep("^ERCC-", rowData(x)$ID, value=TRUE) 
+cat("Spike-ins:\n")
+print(grep("^ERCC-", rowData(x)$ID, value=TRUE))
 
 ctrl.features <- list(
 	mito = rownames(x)[grep("^MT-", rowData(x)$Symbol)]
@@ -49,9 +116,20 @@ qdraw(
 	file = insert(pdf.fn, c("qc", "detected", "mito-pct"))
 );
 
+qdraw(
+	plotMetrics(x),
+	file = insert(pdf.fn, c("qc", "metrics"))
+)
+
+# only one mixture component found under all models
+# (a linear, spline, and polynomial, and one_dimensional)
+#qc.mod <- mixtureModel(x, model_type = "one_dimensional");
+#summary(qc.mod)
+
 # remove poor quality barcodes
 x.f <- with(colData(x), x[, lib.factors > 0.2 & detected > 600 & subsets_mito_percent < 8]);
 
+####
 
 br <- barcodeRanks(counts(x.f));
 
@@ -81,22 +159,428 @@ qdraw(
 #);
 #swapped <- swappedDrops(info.paths, min.frac=0.9, get.swapped=TRUE, get.diagnostics=TRUE);
 
+####
+
+x.f <- logNormCounts(x.f);
+
+dec <- modelGeneVar(x.f)
+qdraw(
+	{
+		plot(dec$mean, dec$total, xlab="mean log-expression", ylab="variance");
+		curve(metadata(dec)$trend(x), col="blue", add=TRUE);
+	},
+	file = insert(pdf.fn, c("gene-var"))
+)
+
+set.seed(1000);
+x.f <- denoisePCA(x.f, dec, subset.row=base.gset.idx);
+cl.nn <- clusterCells(x.f, use.dimred = "PCA", BLUSPARAM = bluster::NNGraphParam(k=10));
+colLabels(x.f) <- factor(cl.nn);
+x.f <- runTSNE(x.f, dimred="PCA");
+
+qdraw(
+	mod_rd_plot(plotTSNE(x.f, colour_by="label", text_by="label")),
+	width = 6, height = 6,
+	file = insert(pdf.fn, c("tsne", "clusters-nn"))
+);
+
+markers <- scoreMarkers(x.f);
+
+markers.sel <- lapply(markers,
+	function(d) {
+		idx <- rownames(d) %in% pbmc.markers.d$gene_symbol;
+		d.f <- d[idx, ];
+		d.f <- d.f[d.f$mean.AUC > 0.5, ];
+		d.f[order(d.f$mean.logFC.cohen, decreasing=TRUE), ]
+	}
+);
+
+print(lapply(markers.sel, function(x) as.data.frame(x[, 1:4])))
+
+# prune B cells and monocytes
+cl.b.cells <- 16;
+cl.dendritic <- c(4, 15);
+cl.remove <- c(cl.b.cells, cl.dendritic);
+x.p <- x.f[, ! cl.nn %in% cl.remove];
+
+set.seed(2000);
+dec.p <- modelGeneVar(x.p);
+x.p <- denoisePCA(x.p, dec.p, subset.row=tcell.gset.idx);
+#x.p <- fixedPCA(x.p, subset.row=tcell.gset.idx, rank=10);
+cl.nn <- clusterCells(x.p, use.dimred = "PCA", BLUSPARAM = bluster::NNGraphParam(cluster.fun="louvain", k=15));
+#cl.nn <- clusterCells(x.p, use.dimred = "PCA", BLUSPARAM = bluster::NNGraphParam());
+colLabels(x.p) <- factor(cl.nn);
+x.p <- runTSNE(x.p, dimred="PCA");
+
+table(cl.nn)
+
+table(cl.nn) / length(cl.nn)
+
+qdraw(
+	mod_rd_plot(plotTSNE(x.p, colour_by="label", text_by="label")),
+	width = 6, height = 6,
+	file = insert(pdf.fn, c("pruned", "tsne", "clusters-nn"))
+);
+
+qdraw(
+	mod_rd_plot(plotTSNE(x.p, colour_by="subsets_mito_percent")) + guides(colour=guide_legend("% mito")),
+	width = 6, height = 6,
+	file = insert(pdf.fn, c("pruned", "tsne", "mito-pct"))
+);
+
+markers.p <- scoreMarkers(x.p);
+
+markers.p.sel <- lapply(markers.p,
+	function(d) {
+		idx <- rownames(d) %in% tcell.gset;
+		d.f <- d[idx, ];
+		#d.f <- d;
+		d.f <- d.f[d.f$mean.AUC > 0.5, ];
+		d.f[order(d.f$mean.logFC.cohen, decreasing=TRUE), ]
+	}
+);
+
+print(lapply(markers.p.sel, function(x) as.data.frame(x[1:10, 1:4])))
+# cluster 1 is NKG2D+ CD8+ T cells
+# cluster 4 contains FOXP3+ Treg cells
+# cluster 5 and 8 are Th2 cells: CD4+ CXCR4+ CCR4+ GATA3+,
+#                         also expresses of ANXA1
+# cluster 9 is Th1 cells: CD4+ IRF1+ IL27RA+ TBX21+
+#                         also expresses ANXA1
+# cluster 7 is effector T cells expressing TNF, IFNG, GZMB, GZMH, GZMA, PRF1
+# cluster 11 is CD8+ effector T cells expressing GZMB, GZMA, PRF1, TNF, IFNG
+# all clusters express TCR, mostly alpha-beta;
+# cluster 11 ma be enriched for gamma-delta
+
+#genes.to.plot <- c("FOXP3", "CD4", "CD8A", "TRAC", "TRDC", "TNF", "IFNG", "LAMP1", "ANXA1");
+#genes.to.plot <- c("CXCR4", "CCR4", "GATA3");
+#genes.to.plot <- c("IRF1", "IL27RA");
+#genes.to.plot <- c("IRF1", "TBX21");
+
+genes.to.plot <- c("FOXP3", "CD4", "CD8A", "TRAC", "TRDC", "TNF", "IFNG", "LAMP1", "ANXA1",
+	"CXCR4", "CCR4", "GATA3", "IRF1", "IL27RA", "IRF1", "TBX21");
+
+for (gene in genes.to.plot) {
+	qdraw(
+		mod_rd_plot(plotTSNE(x.p, colour_by=gene)),
+		width = 6, height = 6,
+		file = insert(pdf.fn, c("pruned", "tsne", tolower(gene)))
+	);
+}
+
+qdraw(
+	plotExpression(x.p, x="label", colour_by="label", features=tmem.markers.d$gene_symbol[tmem.markers.d$category == "core_marker"]),
+	width = 6, height = 5,
+	file = insert(pdf.fn, c("pruned", "expr", "t-mem-markers", "core"))
+);
+
+qdraw(
+	plotExpression(x.p, x="label", colour_by="label", features=c("CD3G", "CD4", "CD8A", "CD8B")),
+	width = 6, height = 5,
+	file = insert(pdf.fn, c("pruned", "expr", "cd4-cd8"))
+);
+
+
+#PD-1	PDCD1	suppression
+#KLRG-1	KLRG1	senescence
+#CD57	B3GAT1	senescence
+#CD161	KLRB1	miscellaneous
+qdraw(
+	plotExpression(x.p, x="label", colour_by="label", features=c("PDCD1", "KLRG1", "B3GAT1", "KLRB1")),
+	width = 6, height = 5,
+	file = insert(pdf.fn, c("pruned", "expr", "t-te"))
+);
+# clusters 6 and 7 may be T_EMRA based on 
+# high KLRG-1, high CD57, and high CD161
+
+
+#GranzymeA	GZMA	cytolysis
+#GranzymeB	GZMB	cytolysis
+#Perforin	PRF1	cytolysis
+qdraw(
+	plotExpression(x.p, x="label", colour_by="label", features=c("GZMA", "GZMB", "GZMH", "PRF1")),
+	width = 6, height = 5,
+	file = insert(pdf.fn, c("pruned", "expr", "gzm"))
+);
+
+# best marker for T_EM are CD45RO+ CCR7-, but but we don't have CD45RO vs. CD45RA
+
+tcr.gset <- c("TRAC", "TRBC1", "TRBC2", "TRGC1", "TRGC2", "TRDC");
+qdraw(
+	plotExpression(x.p, x="label", colour_by="label", features=tcr.gset),
+	width = 6, height = 5,
+	file = insert(pdf.fn, c("pruned", "expr", "tcr"))
+);
+
+cytokines.gset <- c("TNF", "IL2", "IFNG", "LAMP1");
+qdraw(
+	plotExpression(x.p, x="label", colour_by="label", features=cytokines.gset),
+	width = 6, height = 5,
+	file = insert(pdf.fn, c("pruned", "expr", "cytokines"))
+);
+
+# join barcode data
+cold <- left_join(as.data.frame(colData(x.p)), barcode.d, by=c("Barcode"="barcode"));
+cold$response[is.na(cold$response)] <- "nonresponsive";
+cold$response <- factor(cold$response, levels.response);
+
+gset_score2 <- function(sce, gset1, gset2) {
+	a <- t(logcounts(sce)[gset1, , drop=FALSE]);
+	b <- t(logcounts(sce)[gset2, , drop=FALSE]);
+	a <- apply(a, 1, prod);
+	s <- numeric(ncol(sce));
+	for (j in 1:ncol(b)) {
+		s <- a * b[, j];
+	}
+	s / ncol(b)
+}
+
+gset_score <- function(sce, gset) {
+	a <- t(logcounts(sce)[gset, , drop=FALSE]);
+	s <- apply(a, 1, prod);
+	s^(1/ncol(a))
+}
+
+th1.gset <- c("CD4", "TBX21", "IRF1", "IL27RA");
+th2.gset <- c("CD4", "GATA3", "CXCR4", "CCR4");
+#th2.gset <- c("CD4", "GATA3", "CXCR4");
+
+gset_score(x.p, th1.gset)
+
+#cold$th1 <- gset_score2(x.p, th1.gset[1:2], th1.gset[-c(1:2)]);
+#cold$th2 <- gset_score2(x.p, th2.gset[1:2], th2.gset[-c(1:2)]);
+
+cold$th1 <- gset_score(x.p, th1.gset);
+cold$th2 <- gset_score(x.p, th2.gset);
+
+colData(x.p) <- DataFrame(cold);
+
+# Given cateogorical variables x and y,
+# estimate proportions of each level of y within each level of x
+proportions <- function(x, y) {
+	levels.y <- unique(y);
+	ys <- split(y, x);
+	d <- do.call(rbind,
+		mapply(
+			function(y, x) {
+				counts <- table(y);
+				levels.missing <- as.character(setdiff(levels.y, names(counts)));
+				if (length(levels.missing) > 0) {
+					counts[levels.missing] <- 0;
+				}
+				data.frame(
+					binom.confint(counts, sum(counts), method="agresti-coull"),
+					group = x,
+					value = names(counts)
+				)
+			},
+			ys,
+			names(ys),
+			SIMPLIFY = FALSE
+		)
+	);
+	rownames(d) <- NULL;
+
+	d$lower <- pmax(0, d$lower);
+	d$upper <- pmin(1, d$upper);
+
+	d
+}
+
+
+enrich_test <- function(d, alternative="greater") {
+	c01 <- sum(d$x);
+	c00 <- sum(d$n) - c01;
+
+	ds <- split(d, factor(d$group, levels=unique(d$group)));
+	hs <- lapply(ds,
+		function(d) {
+			c11 <- sum(d$x);
+			c10 <- sum(d$n) - c11;
+			m <- matrix(c(c00 - c10, c01 - c11, c10, c11), nrow=2, byrow=TRUE);
+			fisher.test(m, alternative=alternative)
+		}
+	);
+
+	stopifnot(d$group == names(hs))
+
+	d$group <- factor(d$group, levels=unique(d$group));
+	
+	d2 <- data.frame(
+		d,
+		odds_ratio = unlist(lapply(hs, function(h) h$estimate)),
+		odds_ratio_lower = unlist(lapply(hs, function(h) h$conf.int[1])),
+		odds_ratio_upper = unlist(lapply(hs, function(h) h$conf.int[2])),
+		p = unlist(lapply(hs, function(h) h$p.value))
+	);
+	rownames(d2) <- NULL;
+	d2$q <- p.adjust(d2$p, method="BH");
+
+	d2
+}
+
+cl.th1 <- proportions(cold$label, cold$th1 > 0);
+cl.th1.h <- enrich_test(cl.th1[cl.th1$value == TRUE, ]);
+
+cl.th2 <- proportions(cold$label, cold$th2 > 0);
+cl.th2.h <- enrich_test(cl.th2[cl.th2$value == TRUE, ]);
+
+cl.th <- rbind(
+	data.frame(cl.th1.h, th_type = "Th1"),
+	data.frame(cl.th2.h, th_type = "Th2")
+);
+
+qdraw(
+	ggplot(cl.th, aes(x=group, y=mean, ymin=lower, ymax=upper, alpha=q)) +
+		theme_classic() + theme(strip.background = element_blank()) +
+		geom_col(fill=cols.response["transient"]) + 
+		geom_errorbar(width=0.3, show.legend=FALSE) +
+		scale_alpha_continuous(trans=revlog_trans(), breaks=c(0.01, 0.05, 0.25, 0.5), name="FDR", limits=c(1, 0.01)) +
+		facet_wrap(~ th_type, ncol=1) +
+		scale_y_continuous(n.breaks=3) +
+		theme(legend.position="bottom") +
+		xlab("cluster") + ylab("proportion")
+	,
+	width = 3.5, height = 3,
+	file = insert(pdf.fn, c("cl", "prop", "th"))
+);
+
+
+qdraw(
+	mod_rd_plot(plotTSNE(x.p, colour_by="sizeFactor")) + guides(colour=guide_legend("size factor")),
+	width = 6, height = 6,
+	file = insert(pdf.fn, c("pruned", "tsne", "size-factor"))
+);
+
+qdraw(
+	mod_rd_plot(plotTSNE(x.p, colour_by="detected")),
+	width = 6, height = 6,
+	file = insert(pdf.fn, c("pruned", "tsne", "detected"))
+);
+
+qdraw(
+	mod_rd_plot(plotTSNE(x.p[, order(colData(x.p)$response)], colour_by="response")) + 
+		scale_colour_manual(values=cols.response),
+	width = 6, height = 6,
+	file = insert(pdf.fn, c("pruned", "tsne", "response"))
+);
+
+qdraw(
+	mod_rd_plot(plotTSNE(x.p[, order(colData(x.p)$th1)], colour_by="th1")),
+	width = 6, height = 6,
+	file = insert(pdf.fn, c("pruned", "tsne", "th1"))
+);
+
+qdraw(
+	mod_rd_plot(plotTSNE(x.p[, order(colData(x.p)$th2)], colour_by="th2")),
+	width = 6, height = 6,
+	file = insert(pdf.fn, c("pruned", "tsne", "th2"))
+);
+
+qdraw(
+	plotColData(x.p, y="response", x="label", colour_by="response"),
+	file = insert(pdf.fn, c("pruned", "cl", "response"))
+);
+
+qdraw(
+	plotColData(x.p, y="th1", x="label", colour_by="label"),
+	file = insert(pdf.fn, c("pruned", "cl", "th1"))
+);
+
+qdraw(
+	plotColData(x.p, y="th2", x="label", colour_by="label"),
+	file = insert(pdf.fn, c("pruned", "cl", "th2"))
+);
+
+cold.cl.s <- split(cold, cold$label);
+cl.response.d <- do.call(rbind,
+	mapply(
+	function(d, label) {
+		tt <- table(d$response);
+		data.frame(
+			binom.confint(tt, sum(tt), method="agresti-coull"),
+			response = names(tt),
+			label = label
+		)
+	},
+	cold.cl.s,
+	names(cold.cl.s),
+	SIMPLIFY = FALSE
+));
+cl.response.d <- m_fix_table(cl.response.d);
+cl.response.d <- cl.response.d[cl.response.d$response != "nonresponsive", ];
+
+qdraw(
+	ggplot(cl.response.d, aes(x=response, y=mean, ymin=lower, ymax=upper, fill=label)) +
+		theme_classic() + theme(strip.background = element_blank()) +
+		geom_col() + geom_errorbar(width=0.3) +
+		guides(fill="none") +
+		facet_wrap(~ label, ncol=4, scales="free_y") +
+		xlab("") + ylab("proportion") +
+		scale_fill_manual(values=scater:::.get_palette("tableau20")) +
+		theme(axis.text.x = element_text(angle = 45, vjust=1, hjust=1))
+	,
+	width = 4.5, height = 5,
+	file = insert(pdf.fn, c("cl", "prop", "response"))
+);
+
+cold.response.s <- split(cold, cold$response);
+response.cl.d <- do.call(rbind,
+	mapply(
+	function(d, response) {
+		tt <- table(d$label);
+		data.frame(
+			binom.confint(tt, sum(tt), method="agresti-coull"),
+			label = names(tt),
+			response = response
+		)
+	},
+	cold.response.s,
+	names(cold.response.s),
+	SIMPLIFY = FALSE
+));
+response.cl.d <- m_fix_table(response.cl.d);
+response.cl.d$group <- response.cl.d$label;
+response.cl.d$value <- response.cl.d$response;
+
+response.cl.h <- rbind(
+	enrich_test(filter(response.cl.d, response == "transient")),
+	enrich_test(filter(response.cl.d, response == "durable"))
+);
+
+qdraw(
+	ggplot(response.cl.h, aes(x=label, y=mean, ymin=lower, ymax=upper, fill=response, alpha=q)) +
+		theme_classic() + theme(strip.background = element_blank()) +
+		geom_col() + geom_errorbar(width=0.3, show.legend=FALSE) +
+		scale_fill_manual(values=cols.response) +
+		guides(fill="none") +
+		scale_alpha_continuous(trans=revlog_trans(), breaks=c(0.01, 0.05, 0.25, 0.5), name="FDR", limits=c(1, 0.01)) +
+		facet_wrap(~ response, ncol=1) +
+		theme(legend.position="bottom") +
+		xlab("cluster") + ylab("proportion")
+	,
+	width = 3.5, height = 3,
+	file = insert(pdf.fn, c("response", "prop", "cl"))
+);
+
+####
+
+cold0 <- cold;
 
 # convert to SingellCellAssay for use with MAST
-sca <- SceToSingleCellAssay(logNormCounts(x.f));
-
-cold <- left_join(as.data.frame(colData(sca)), barcode.d, by=c("Barcode"="barcode"));
-cold$response[is.na(cold$response)] <- "nonresponsive";
-cold$response <- factor(cold$response, c("nonresponsive", "transient", "durable"));
-
+sca <- SceToSingleCellAssay(x.p);
+cold <- colData(sca);
 mcold <- data.table::as.data.table(mcols(sca));
 
 
 # --- T cells
 
-ens.cd4 <- mcold$ID[mcold$Symbol == "CD4"]
-ens.cd8a <- mcold$ID[mcold$Symbol == "CD8A"]
-ens.cd8b <- mcold$ID[mcold$Symbol == "CD8B"]
+#ens.cd4 <- mcold$ID[mcold$Symbol == "CD4"]
+#ens.cd8a <- mcold$ID[mcold$Symbol == "CD8A"]
+#ens.cd8b <- mcold$ID[mcold$Symbol == "CD8B"]
+ens.cd4 <- "CD4";
+ens.cd8a <- "CD8A";
+ens.cd8b <- "CD8B";
 
 qdraw(
 	{
@@ -122,8 +606,6 @@ sca.t.cells <- counts(sca[t.cell.markers, ]);
 table(as.numeric(sca.t.cells))
 
 d.t.cells <- as.data.frame(as.matrix(t(sca.t.cells > 0)));
-colnames(d.t.cells) <- mcold$Symbol[match(t.cell.markers, mcold$ID)];
-
 
 with(d.t.cells, table(CD8A, CD8B))
 with(d.t.cells, cor(CD8A, CD8B))
@@ -195,7 +677,7 @@ rforest <- qcache(
 
 		rforest
 	},
-	file = rf.fn
+	file = as.character(rf.fn, simplify=TRUE)
 );
 
 # use trained classifier to predict unknown T cells
@@ -212,10 +694,6 @@ print(with(cold, prop.table(table(t_cell, response)[, -1], 1)))
 print(with(cold, fisher.test(table(t_cell, response)[, -1])))
 # odds ratio = 50.07384
 # p-value = 4.937e-15
-
-library(binom)
-library(ggplot2)
-library(ggsci)
 
 response.p <- with(cold, fisher.test(table(t_cell, response != "nonresponsive"))$p.value);
 
@@ -285,8 +763,8 @@ qdraw(
 colData(sca) <- DataFrame(cold);
 qwrite(cold, insert(rds.fn, "cells"));
 
-colData(x.f) <- DataFrame(cold);
-qwrite(x.f, insert(rds.fn, "sce"));
+colData(x.p) <- DataFrame(cold);
+qwrite(x.p, insert(rds.fn, "sce"));
 
 sca.cd4 <- sca[, cold$t_cell == "CD4"];
 sca.cd8 <- sca[, cold$t_cell == "CD8"];
