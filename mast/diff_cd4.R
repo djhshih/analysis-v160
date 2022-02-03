@@ -44,9 +44,9 @@ coefs <- coefs[contrast != "(Intercept)", ];
 lr <- lrTest(zfit, "response");
 qwrite(lr, insert(rds.fn, "mast-zlm-lr"));
 
-wd.durable <- waldTest(zfit, Hypothesis("responsedurable", c("(Intercept)", "responsedurable")));
+wd.durable <- NULL;
 wd.transient <- waldTest(zfit, Hypothesis("responsetransient", c("(Intercept)", "responsetransient")));
-wd.durable.vs.transient <- waldTest(zfit, Hypothesis("responsedurable-responsetransient", c("responsetransient", "responsedurable")));
+wd.durable.vs.transient <- NULL;
 wd <- list(durable = wd.durable, transient = wd.transient, durable.vs.transient = wd.durable.vs.transient);
 qwrite(wd, insert(rds.fn, "mast-zlm-wd"));
 
@@ -87,6 +87,12 @@ sgenes.wd <- list(
 );
 
 compare_sets(sgenes.wd)
+
+sgenes.wd.disc <- list(
+	durable = extract_sig_genes(wd$durable, component="disc"),
+	transient = extract_sig_genes(wd$transient, component="disc"),
+	durable.vs.transient = extract_sig_genes(wd$durable.vs.transient, component="disc")
+);
 
 spids.lr <- extract_sig_genes(lr, symbol=FALSE);
 sgenes.lr <- pid_to_genes(spids.lr);

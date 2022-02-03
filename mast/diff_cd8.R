@@ -50,7 +50,7 @@ pid_to_genes <- function(pids) {
 }
 
 # res waldTest or lrTest results
-extract_sig_genes <- function(res, component="hurdle", fdr.cut=0.05, symbol=TRUE) {
+extract_sig_genes <- function(res, component="hurdle", fdr.cut=0.05, symbol=FALSE) {
 	ps <- sort(res[, component, "Pr(>Chisq)"]);
 	qs <- p.adjust(ps, "BH");
 
@@ -81,6 +81,12 @@ sgenes.wd <- list(
 );
 
 compare_sets(sgenes.wd)
+
+sgenes.wd.disc <- list(
+	durable = extract_sig_genes(wd$durable, component="disc"),
+	transient = extract_sig_genes(wd$transient, component="disc"),
+	durable.vs.transient = extract_sig_genes(wd$durable.vs.transient, component="disc")
+);
 
 spids.lr <- extract_sig_genes(lr, symbol=FALSE);
 sgenes.lr <- pid_to_genes(spids.lr);
