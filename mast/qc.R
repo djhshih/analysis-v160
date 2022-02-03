@@ -10,6 +10,7 @@ library(scater)
 library(binom)
 library(ggplot2)
 library(ggsci)
+library(bluster)
 
 
 source("R/common.R")
@@ -54,10 +55,6 @@ rds.fn <- insert(out.fn, ext="rds");
 pdf.fn <- insert(out.fn, ext="pdf");
 
 barcode.d <- qread("../../tcr-profiling/tcr/merged/tcr_aggr_responsive_barcodes.csv");
-base.gset <- read.table("../annot/gset/gobp_immune_response.grp", skip=2)[,1];
-tact.gset <- read.table("../annot/gset/gobp_t_cell_activation.grp", skip=2)[,1];
-pbmc.markers.d <- qread("../annot/pbmc_markers.csv");
-tmem.markers.d <- qread("../annot/t-mem_markers.tsv");
 
 x <- read10xCounts(file.path(indir, "filtered_feature_bc_matrix"));
 mcold <- DataFrame(rowData(x));
@@ -74,6 +71,11 @@ rowData(x)$Symbol[dup.idx] <- paste(rowData(x)$Symbol[dup.idx], rowData(x)$ID[du
 
 mcold <- DataFrame(rowData(x));
 rownames(x) <- mcold$Symbol;
+
+base.gset <- read.table("../annot/gset/gobp_immune_response.grp", skip=2)[,1];
+tact.gset <- read.table("../annot/gset/gobp_t_cell_activation.grp", skip=2)[,1];
+pbmc.markers.d <- qread("../annot/pbmc_markers.csv");
+tmem.markers.d <- qread("../annot/t-mem_markers.tsv");
 
 tcell.gset <- unique(sort(c(
 	tact.gset,
@@ -207,9 +209,15 @@ set.seed(2000);
 dec.p <- modelGeneVar(x.p);
 x.p <- denoisePCA(x.p, dec.p, subset.row=tcell.gset.idx);
 #x.p <- fixedPCA(x.p, subset.row=tcell.gset.idx, rank=10);
+
 cl.nn <- clusterCells(x.p, use.dimred = "PCA", BLUSPARAM = bluster::NNGraphParam(cluster.fun="louvain", k=15));
 #cl.nn <- clusterCells(x.p, use.dimred = "PCA", BLUSPARAM = bluster::NNGraphParam());
 colLabels(x.p) <- factor(cl.nn);
+cold$cluster <- cold$label;
+cold$cluster_sel <- cold$label;
+cl.sel <- c("5", "9", "7", "11");
+cold$cluster_sel[! cold$cluster %in% cl.sel] <- NA;
+
 x.p <- runTSNE(x.p, dimred="PCA");
 
 table(cl.nn)
@@ -217,7 +225,9 @@ table(cl.nn)
 table(cl.nn) / length(cl.nn)
 
 qdraw(
-	mod_rd_plot(plotTSNE(x.p, colour_by="label", text_by="label")),
+	mod_rd_plot(plotTSNE(x.p, colour_by="label", text_by="label")) +
+		scale_colour_manual(values=scater:::.get_palette("tableau20"))
+	,
 	width = 6, height = 6,
 	file = insert(pdf.fn, c("pruned", "tsne", "clusters-nn"))
 );
@@ -249,16 +259,24 @@ print(lapply(markers.p.sel, function(x) as.data.frame(x[1:10, 1:4])))
 #                         also expresses ANXA1
 # cluster 7 is effector T cells expressing TNF, IFNG, GZMB, GZMH, GZMA, PRF1
 # cluster 11 is CD8+ effector T cells expressing GZMB, GZMA, PRF1, TNF, IFNG
-# all clusters express TCR, mostly alpha-beta;
-# cluster 11 ma be enriched for gamma-delta
+# all clusters express TCR, mostly alpha-beta
 
+as.data.frame(markers.p.sel[[7]][1:100, 1:4])
+
+as.data.frame(markers.p.sel[[11]][1:100, 1:4])
+
+#genes.to.plot <- c("CCL5", "NKG7", "PRF1", "GZMB", "XCL1", "CRTAM", "VSIR", "PDCD1");
 #genes.to.plot <- c("FOXP3", "CD4", "CD8A", "TRAC", "TRDC", "TNF", "IFNG", "LAMP1", "ANXA1");
 #genes.to.plot <- c("CXCR4", "CCR4", "GATA3");
 #genes.to.plot <- c("IRF1", "IL27RA");
 #genes.to.plot <- c("IRF1", "TBX21");
+genes.to.plot <- c("CCR7");
 
-genes.to.plot <- c("FOXP3", "CD4", "CD8A", "TRAC", "TRDC", "TNF", "IFNG", "LAMP1", "ANXA1",
-	"CXCR4", "CCR4", "GATA3", "IRF1", "IL27RA", "IRF1", "TBX21");
+genes.to.plot <- c(
+	"FOXP3", "CD4", "CD8A", "TRAC", "TRDC", "TNF", "IFNG", "LAMP1", "ANXA1",
+	"CXCR4", "CCR4", "GATA3", "IRF1", "IL27RA", "IRF1", "TBX21",
+	"CCL5", "NKG7", "PRF1", "GZMB", "XCL1", "CRTAM", "VSIR", "PDCD1"
+);
 
 for (gene in genes.to.plot) {
 	qdraw(
@@ -758,21 +776,220 @@ qdraw(
 	file = insert(pdf.fn, c("prop", "t-cell", "response-type"))
 )
 
+# ---
+
+colData(sca) <- DataFrame(cold);
+colData(x.p) <- DataFrame(cold);
+
+
+# --- Analyze the responsives clones
+
+with(cold, table(response, t_cell))
+
+with(cold[cold$cluster %in% c("5", "9", "7", "11"), ], table(response, t_cell, as.character(cluster)))
+
+
+x.responsive <- x.p[, cold$response %in% c("responsive", "transient")];
+
+set.seed(1000);
+dec.responsive <- modelGeneVar(x.responsive);
+x.responsive <- denoisePCA(x.responsive, dec.responsive, subset.row=tcell.gset.idx);
+cl.responsive.nn <- clusterCells(x.responsive, use.dimred = "PCA", BLUSPARAM = bluster::NNGraphParam(cluster.fun="louvain", k=5));
+colLabels(x.responsive) <- factor(cl.responsive.nn);
+x.responsive <- runTSNE(x.responsive, dimred="PCA");
+
+qdraw(
+	mod_rd_plot(plotTSNE(x.responsive, colour_by="response")) +
+		scale_colour_manual(values=cols.response),
+	,
+	width = 6, height = 6,
+	file = insert(pdf.fn, c("responsive", "tsne", "response"))
+);
+
+qdraw(
+	mod_rd_plot(plotTSNE(x.responsive, colour_by="cluster", text_by="cluster")),
+	width = 6, height = 6,
+	file = insert(pdf.fn, c("responsive", "tsne", "clusters-nn1"))
+);
+
+qdraw(
+	mod_rd_plot(plotTSNE(x.responsive, colour_by="t_cell")),
+	width = 6, height = 6,
+	file = insert(pdf.fn, c("responsive", "tsne", "cd4-cd8"))
+);
+
+qdraw(
+	mod_rd_plot(plotTSNE(x.responsive, colour_by="label", text_by="label")),
+	width = 6, height = 6,
+	file = insert(pdf.fn, c("responsive", "tsne", "clusters-nn2"))
+);
+
+
+x.durable <- x.p[, cold$response == "durable"];
+
+set.seed(1000);
+dec.durable <- modelGeneVar(x.durable);
+x.durable <- denoisePCA(x.durable, dec.durable, subset.row=tcell.gset.idx);
+cl.durable.nn <- clusterCells(x.durable, use.dimred = "PCA", BLUSPARAM = bluster::NNGraphParam(cluster.fun="louvain", k=5));
+colLabels(x.durable) <- factor(cl.durable.nn);
+x.durable <- runTSNE(x.durable, dimred="PCA");
+
+qdraw(
+	mod_rd_plot(plotTSNE(x.durable, colour_by="label", text_by="label")),
+	width = 6, height = 6,
+	file = insert(pdf.fn, c("durable", "tsne", "clusters-nn"))
+);
+
+
+x.transient <- x.p[, cold$response == "transient"];
+
+set.seed(1000);
+dec.transient <- modelGeneVar(x.transient);
+x.transient <- denoisePCA(x.transient, dec.transient, subset.row=tcell.gset.idx);
+cl.transient.nn <- clusterCells(x.transient, use.dimred = "PCA", BLUSPARAM = bluster::NNGraphParam(cluster.fun="louvain", k=5));
+colLabels(x.transient) <- factor(cl.transient.nn);
+x.transient <- runTSNE(x.transient, dimred="PCA", perplexity=5);
+
+qdraw(
+	mod_rd_plot(plotTSNE(x.transient, colour_by="label", text_by="label")),
+	width = 6, height = 6,
+	file = insert(pdf.fn, c("transient", "tsne", "clusters-nn"))
+);
+
+
+x.rsel <- x.p[, cold$cluster %in% cl.sel & cold$response != "nonresponsive"];
+dec.rsel <- modelGeneVar(x.rsel);
+x.rsel <- denoisePCA(x.rsel, dec.rsel, subset.row=tcell.gset.idx);
+x.rsel <- runUMAP(x.rsel, dimred="PCA");
+
+qdraw(
+	mod_rd_plot(plotUMAP(x.rsel, colour_by="response", shape_by="t_cell")) +
+		scale_colour_manual(values=cols.response)
+	,
+	width = 6, height = 6,
+	file = insert(pdf.fn, c("responsive-sel", "umap", "response"))
+);
+
+qdraw(
+	mod_rd_plot(plotUMAP(x.rsel, colour_by="cluster", shape_by="t_cell")) +
+		scale_colour_manual(values=scater:::.get_palette("tableau20")[as.integer(cl.sel)])
+	,
+	width = 6, height = 6,
+	file = insert(pdf.fn, c("responsive-sel", "umap", "cluster"))
+);
+
+
+set.seed(1000);
+x.sel <- x.p[, colData(x.p)$cluster %in% cl.sel];
+dec.sel <- modelGeneVar(x.sel);
+x.sel <- denoisePCA(x.sel, dec.rsel, subset.row=tcell.gset.idx);
+#x.sel <- fixedPCA(x.sel, rank=50, subset.row=tcell.gset.idx);
+x.sel <- runDiffusionMap(x.sel, dimred="PCA");
+x.sel <- runUMAP(x.sel, dimred="PCA");
+cl2.n <- clusterCells(x.sel, use.dimred="UMAP",
+	BLUSPARAM = bluster::KmeansParam(centers=3));
+table(cl2.n)
+cl2 <- factor(cl2.n, levels=c(2, 1, 3), labels=LETTERS[1:3]);
+colLabels(x.sel) <- cl2;
+
+cold$cluster2 <- factor(NA, levels=levels(cl2));
+cold$cluster2[match(names(cl2), rownames(cold))] <- cl2;
+table(cold$cluster2)
+
+x.sel.reordered <- x.sel[, order(colData(x.sel)$response)];
+
+qdraw(
+	mod_rd_plot(plotDiffusionMap(x.sel.reordered, colour_by="response", shape_by="t_cell")) +
+		scale_colour_manual(values=cols.response)
+	,
+	width = 6, height = 6,
+	file = insert(pdf.fn, c("selected", "diffusion", "response"))
+);
+
+qdraw(
+	mod_rd_plot(plotUMAP(x.sel.reordered,
+		colour_by="response", shape_by="t_cell")) +
+		scale_colour_manual(values=cols.response)
+	,
+	width = 6, height = 6,
+	file = insert(pdf.fn, c("selected", "umap", "response"))
+);
+
+cols.cl <- scater:::.get_palette("tableau20");
+cols.cl.sel <- cols.cl[sort(as.integer(cl.sel))];
+
+rgb2col <- function(x) {
+	rgb(x[1, ], x[2, ], x[3, ], maxColorValue=255)
+}
+
+cols.cl2 <- c(
+	A = rgb2col(col2rgb(cols.cl.sel[1])*0.6 + col2rgb(cols.cl.sel[3])*0.4),
+	B = cols.cl.sel[2],
+	C = cols.cl.sel[4]
+);
+
+qdraw(
+	mod_rd_plot(plotUMAP(x.sel, colour_by="cluster", shape_by="t_cell")) +
+		scale_colour_manual(values=cols.cl.sel)
+	,
+	width = 6, height = 6,
+	file = insert(pdf.fn, c("selected", "umap", "cluster"))
+);
+
+qdraw(
+	mod_rd_plot(plotUMAP(x.sel, colour_by="label", shape_by="t_cell")) +
+		scale_colour_manual(values=cols.cl2)
+	,
+	width = 6, height = 6,
+	file = insert(pdf.fn, c("selected", "umap", "label"))
+);
+
+qdraw(
+	mod_rd_plot(plotPCA(x.sel, colour_by="label", shape_by="t_cell")) +
+		scale_colour_manual(values=cols.cl2)
+	,
+	width = 6, height = 6,
+	file = insert(pdf.fn, c("selected", "pca", "label"))
+);
+
+qdraw(
+	mod_rd_plot(plotUMAP(x.sel, colour_by="sizeFactor", shape_by="t_cell"))
+	,
+	width = 6, height = 6,
+	file = insert(pdf.fn, c("selected", "umap", "size-factor"))
+);
+
+qdraw(
+	mod_rd_plot(plotUMAP(x.sel, colour_by="t_cell0", shape_by="t_cell")) +
+		scale_colour_npg()
+	,
+	width = 6, height = 6,
+	file = insert(pdf.fn, c("selected", "umap", "t-cell0"))
+);
+
+qdraw(
+	mod_rd_plot(plotUMAP(x.sel, colour_by="t_cell", shape_by="t_cell")) +
+		scale_colour_npg()
+	,
+	width = 6, height = 6,
+	file = insert(pdf.fn, c("selected", "umap", "t-cell"))
+);
+
+
 # --- End T cells
 
 colData(sca) <- DataFrame(cold);
-qwrite(cold, insert(rds.fn, "cells"));
-
 colData(x.p) <- DataFrame(cold);
+
+qwrite(cold, insert(rds.fn, "cells"));
+qwrite(mcold, insert(rds.fn, "features"));
+
 qwrite(x.p, insert(rds.fn, "sce"));
 
 sca.cd4 <- sca[, cold$t_cell == "CD4"];
 sca.cd8 <- sca[, cold$t_cell == "CD8"];
 
-qwrite(mcold, insert(rds.fn, "features"));
-
 qwrite(sca, insert(rds.fn, "sca"));
 qwrite(sca.cd4, insert(rds.fn, c("sca", "cd4")));
 qwrite(sca.cd8, insert(rds.fn, c("sca", "cd8")));
-
 
