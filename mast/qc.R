@@ -36,17 +36,6 @@ mod_rd_plot <- function(g) {
 	g + theme(legend.position="bottom", legend.box = "horizontal") + coord_fixed()
 }
 
-revlog_trans <- function(base = 10) {
-	library(scales)
-	trans <- function(x) -log(x, base)
-	inv <- function(x) base^(-x)
-	trans_new(
-		paste0("revlog-", format(base)), trans, inv,
-		log_breaks(base = base), 
-		domain = c(1e-100, Inf)
-	)
-}
-
 
 indir <- "../aggr/5p/pt26/outs/count"
 
@@ -86,6 +75,7 @@ tcell.gset <- unique(sort(c(
 base.gset.idx <- na.omit(match(base.gset, mcold$Symbol));
 tcell.gset.idx <- na.omit(match(tcell.gset, mcold$Symbol));
 tmem.gset.idx <- na.omit(match(tmem.markers.d$gene_symbol, mcold$Symbol));
+tmem.core.gset.idx <- na.omit(match(tmem.markers.d$gene_symbol[tmem.markers.d$varying == 1], mcold$Symbol));
 
 # There are no spike-ins
 cat("Spike-ins:\n")
@@ -130,6 +120,7 @@ qdraw(
 
 # remove poor quality barcodes
 x.f <- with(colData(x), x[, lib.factors > 0.2 & detected > 600 & subsets_mito_percent < 8]);
+
 
 ####
 
@@ -205,10 +196,17 @@ cl.dendritic <- c(4, 15);
 cl.remove <- c(cl.b.cells, cl.dendritic);
 x.p <- x.f[, ! cl.nn %in% cl.remove];
 
+frac.expressed <- apply(logcounts(x.p), 1, function(z) mean(z > 1));
+summary(frac.expressed)
+features.expressed <- rownames(x.p)[frac.expressed > 0.05];
+length(features.expressed)
+qwrite(features.expressed, insert(rds.fn, "genes-expressed"));
+
 set.seed(2000);
 dec.p <- modelGeneVar(x.p);
 x.p <- denoisePCA(x.p, dec.p, subset.row=tcell.gset.idx);
 #x.p <- fixedPCA(x.p, subset.row=tcell.gset.idx, rank=10);
+
 
 cl.nn <- clusterCells(x.p, use.dimred = "PCA", BLUSPARAM = bluster::NNGraphParam(cluster.fun="louvain", k=15));
 #cl.nn <- clusterCells(x.p, use.dimred = "PCA", BLUSPARAM = bluster::NNGraphParam());
@@ -889,6 +887,7 @@ x.sel <- runUMAP(x.sel, dimred="PCA");
 cl2.n <- clusterCells(x.sel, use.dimred="UMAP",
 	BLUSPARAM = bluster::KmeansParam(centers=3));
 table(cl2.n)
+#colLabels(x.sel) <- factor(cl2.n);
 cl2 <- factor(cl2.n, levels=c(2, 1, 3), labels=LETTERS[1:3]);
 colLabels(x.sel) <- cl2;
 
@@ -937,8 +936,8 @@ qdraw(
 );
 
 qdraw(
-	mod_rd_plot(plotUMAP(x.sel, colour_by="label", shape_by="t_cell")) +
-		scale_colour_manual(values=cols.cl2)
+	mod_rd_plot(plotUMAP(x.sel, colour_by="label", shape_by="t_cell"))
+		#scale_colour_manual(values=cols.cl2)
 	,
 	width = 6, height = 6,
 	file = insert(pdf.fn, c("selected", "umap", "label"))
@@ -974,6 +973,195 @@ qdraw(
 	width = 6, height = 6,
 	file = insert(pdf.fn, c("selected", "umap", "t-cell"))
 );
+
+
+set.seed(1000);
+x.sel.cd8 <- x.p[, colData(x.p)$cluster %in% cl.sel & colData(x.p)$t_cell == "CD8"];
+#dec.sel.cd8 <- modelGeneVar(x.sel.cd8);
+#x.sel.cd8 <- denoisePCA(x.sel.cd8, dec.sel.cd8, subset.row=tmem.core.gset.idx);
+x.sel.cd8 <- fixedPCA(x.sel.cd8, rank=20, subset.row=tmem.core.gset.idx);
+#x.sel.cd8 <- runDiffusionMap(x.sel.cd8, dimred="PCA");
+x.sel.cd8 <- runUMAP(x.sel.cd8, dimred="PCA", n_neighbors=30);
+x.sel.cd8 <- runTSNE(x.sel.cd8, dimred="PCA");
+cl.cd8.n <- clusterCells(x.sel.cd8, use.dimred="UMAP",
+	BLUSPARAM = bluster::KmeansParam(centers=3));
+table(cl.cd8.n)
+colLabels(x.sel.cd8) <- factor(cl.cd8.n);
+#cl2 <- factor(cl2.n, levels=c(2, 1, 3), labels=LETTERS[1:3]);
+#colLabels(x.sel) <- cl2;
+
+#qdraw(
+#	mod_rd_plot(plotDiffusionMap(x.sel.reordered, colour_by="response", shape_by="t_cell")) +
+#		scale_colour_manual(values=cols.response)
+#	,
+#	width = 6, height = 6,
+#	file = insert(pdf.fn, c("cd8-sel", "diffusion", "response"))
+#);
+
+qdraw(
+	mod_rd_plot(plotUMAP(x.sel.cd8, colour_by="cluster")) +
+		scale_colour_manual(values=cols.cl.sel)
+	,
+	width = 6, height = 6,
+	file = insert(pdf.fn, c("cd8-sel", "umap", "cluster"))
+);
+
+qdraw(
+	mod_rd_plot(plotUMAP(
+		x.sel.cd8[, order(colData(x.sel.cd8)$t_cell)], colour_by="response")) +
+		scale_colour_manual(values=cols.response)
+	,
+	width = 6, height = 6,
+	file = insert(pdf.fn, c("cd8-sel", "umap", "response"))
+);
+
+qdraw(
+	mod_rd_plot(plotUMAP(x.sel.cd8, colour_by="CCR7"))
+	,
+	width = 6, height = 6,
+	file = insert(pdf.fn, c("cd8-sel", "umap", "ccr7"))
+);
+
+qdraw(
+	mod_rd_plot(plotUMAP(x.sel.cd8, colour_by="CD28"))
+	,
+	width = 6, height = 6,
+	file = insert(pdf.fn, c("cd8-sel", "umap", "cd28"))
+);
+
+qdraw(
+	mod_rd_plot(plotUMAP(x.sel.cd8, colour_by="FAS"))
+	,
+	width = 6, height = 6,
+	file = insert(pdf.fn, c("cd8-sel", "umap", "fas-cd95"))
+);
+
+qdraw(
+	mod_rd_plot(plotUMAP(x.sel.cd8, colour_by="CD27"))
+	,
+	width = 6, height = 6,
+	file = insert(pdf.fn, c("cd8-sel", "umap", "cd27"))
+);
+
+qdraw(
+	mod_rd_plot(plotUMAP(x.sel.cd8, colour_by="IL7R"))
+	,
+	width = 6, height = 6,
+	file = insert(pdf.fn, c("cd8-sel", "umap", "il17r-cd127"))
+);
+
+qdraw(
+	mod_rd_plot(plotUMAP(x.sel.cd8, colour_by="IL2RB"))
+	,
+	width = 6, height = 6,
+	file = insert(pdf.fn, c("cd8-sel", "umap", "il2rb-cd122"))
+);
+
+qdraw(
+	mod_rd_plot(plotUMAP(x.sel.cd8, colour_by="KLRG1"))
+	,
+	width = 6, height = 6,
+	file = insert(pdf.fn, c("cd8-sel", "umap", "klrg1"))
+);
+
+qdraw(
+	mod_rd_plot(plotUMAP(x.sel.cd8, colour_by="KLRB1"))
+	,
+	width = 6, height = 6,
+	file = insert(pdf.fn, c("cd8-sel", "umap", "klrb1-cd161"))
+);
+
+qdraw(
+	mod_rd_plot(plotUMAP(x.sel.cd8, colour_by="SELL"))
+	,
+	width = 6, height = 6,
+	file = insert(pdf.fn, c("cd8-sel", "umap", "sell"))
+);
+
+qdraw(
+	mod_rd_plot(plotUMAP(x.sel.cd8, colour_by="CXCR4"))
+	,
+	width = 6, height = 6,
+	file = insert(pdf.fn, c("cd8-sel", "umap", "cxcr4"))
+);
+
+qdraw(
+	mod_rd_plot(plotUMAP(x.sel.cd8, colour_by="GZMB"))
+	,
+	width = 6, height = 6,
+	file = insert(pdf.fn, c("cd8-sel", "umap", "gzmb"))
+);
+
+qdraw(
+	mod_rd_plot(plotUMAP(x.sel.cd8, colour_by="PRF1"))
+	,
+	width = 6, height = 6,
+	file = insert(pdf.fn, c("cd8-sel", "umap", "prf1"))
+);
+
+qdraw(
+	mod_rd_plot(plotUMAP(x.sel.cd8, colour_by="IL6ST"))
+	,
+	width = 6, height = 6,
+	file = insert(pdf.fn, c("cd8-sel", "umap", "il6st-cd130"))
+);
+
+qdraw(
+	mod_rd_plot(plotUMAP(x.sel.cd8, colour_by="KIT"))
+	,
+	width = 6, height = 6,
+	file = insert(pdf.fn, c("cd8-sel", "umap", "kit"))
+);
+
+qdraw(
+	mod_rd_plot(plotUMAP(x.sel.cd8, colour_by="CCR4"))
+	,
+	width = 6, height = 6,
+	file = insert(pdf.fn, c("cd8-sel", "umap", "ccr4"))
+);
+
+
+
+qdraw(
+	mod_rd_plot(plotTSNE(
+		x.sel.cd8[, order(colData(x.sel.cd8)$t_cell)], colour_by="cluster")) +
+		scale_colour_manual(values=cols.cl.sel)
+	,
+	width = 6, height = 6,
+	file = insert(pdf.fn, c("cd8-sel", "tsne", "cluster"))
+);
+
+qdraw(
+	mod_rd_plot(plotTSNE(
+		x.sel.cd8[, order(colData(x.sel.cd8)$t_cell)], colour_by="response")) +
+		scale_colour_manual(values=cols.response)
+	,
+	width = 6, height = 6,
+	file = insert(pdf.fn, c("cd8-sel", "tsne", "response"))
+);
+
+
+tmem.clf <- qread("../data/etabm40_pamr.rds");
+
+x.sel.cd8.tmem.cl <- tmem.clf$predict(tmem.clf, logcounts(x.sel.cd8));
+
+x.sel.cd8.tmem.post <- tmem.clf$predict(tmem.clf, logcounts(x.sel.cd8), type="posterior");
+x.sel.cd8.tmem.post
+
+table(x.sel.cd8.tmem.cl)
+table(colData(x.sel.cd8)$response, x.sel.cd8.tmem.cl)
+
+prop.table(table(colData(x.sel.cd8)$response, x.sel.cd8.tmem.cl), margin=1)
+
+
+x.p.cd8 <- x.p[, colData(x.p)$t_cell == "CD8"];
+
+x.p.cd8.tmem.cl <- tmem.clf$predict(tmem.clf, logcounts(x.p.cd8));
+
+table(x.p.cd8.tmem.cl)
+table(colData(x.p.cd8)$response, x.p.cd8.tmem.cl)
+
+prop.table(table(colData(x.p.cd8)$response, x.p.cd8.tmem.cl), margin=1)
 
 
 # --- End T cells
