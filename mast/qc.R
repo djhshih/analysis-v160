@@ -22,12 +22,17 @@ set.seed(1337);
 
 
 m_fix_table <- function(d) {
-	d$label <- factor(d$label, levels=sort(as.integer(unique(d$label))));
+	if (!is.null(d$label)) {
+		d$label <- factor(d$label, levels=sort(as.integer(unique(d$label))));
+	}
 
-	d$lower <- pmax(0, d$lower);
-	d$upper <- pmin(1, d$upper);
+	if (!is.null(d$response)) {
+		d$response <- factor(d$response, levels=levels.response);
+	}
 
-	d$response <- factor(d$response, levels=levels.response);
+	if (!is.null(d$tmem_type)) {
+		d$tmem_type <- factor(d$tmem_type, levels=c("N", "CM", "EM", "EMRA"));	
+	}
 
 	d
 }
@@ -776,6 +781,75 @@ qdraw(
 
 # ---
 
+tmem.clf <- qread("../data/etabm40_pamr.rds");
+tmem.levels <- levels(tmem.clf$y);
+names(tmem.levels) <- tmem.levels;
+
+cd8.idx <- colData(x.p)$t_cell == "CD8";
+x.p.cd8 <- x.p[, ];
+
+x.p.cd8.tmem.cl <- tmem.clf$predict(tmem.clf, logcounts(x.p.cd8));
+
+cold$tmem_type <- factor(NA, levels=tmem.levels);
+cold$tmem_type[match(rownames(colData(x.p.cd8)), rownames(cold))] <- x.p.cd8.tmem.cl;
+
+table(x.p.cd8.tmem.cl)
+with(cold, table(tmem_type))
+table(colData(x.p.cd8)$response, x.p.cd8.tmem.cl)
+with(cold, table(response, tmem_type, t_cell))
+
+tmem.ct <- table(colData(x.p.cd8)$response, x.p.cd8.tmem.cl);
+tmem.ct
+prop.table(tmem.ct, margin=1)
+fisher.test(tmem.ct[c("nonresponsive", "transient"), ])
+fisher.test(tmem.ct[c("nonresponsive", "durable"), ])
+
+x.p.cd8.tmem.prop <- proportions(colData(x.p.cd8)$response, x.p.cd8.tmem.cl);
+
+x.p.cd8.tmem.prop <-
+	rename(x.p.cd8.tmem.prop, tmem_type = value, response = group) %>% 
+	m_fix_table();
+
+
+lapply(tmem.levels,
+	function(v) {
+		enrich_test(filter(x.p.cd8.tmem.prop, value == v,
+			group %in% c("nonresponsive", "transient")),
+			alternative = "two.sided"
+		)
+	}
+)
+
+lapply(tmem.levels,
+	function(v) {
+		enrich_test(filter(x.p.cd8.tmem.prop, value == v,
+			group %in% c("nonresponsive", "durable")),
+			alternative = "two.sided"
+		)
+	}
+)
+
+qdraw(
+	ggplot(x.p.cd8.tmem.prop,
+		aes(x=tmem_type, y=mean, ymin=lower, ymax=upper, fill=response)
+	) +
+		theme_classic() + theme(strip.background = element_blank()) +
+		geom_col() + 
+		geom_errorbar(width=0.3, show.legend=FALSE) +
+		#scale_alpha_continuous(trans=revlog_trans(), breaks=c(0.01, 0.05, 0.25, 0.5), name="FDR", limits=c(1, 0.01)) +
+		facet_wrap(~ response, ncol=1) +
+		scale_fill_manual(values=cols.response) +
+		guides(fill="none") +
+		#scale_y_continuous(n.breaks=3) +
+		theme(legend.position="bottom") +
+		xlab("Memory CD8 T cell subset") + ylab("proportion")
+	,
+	width = 2, height = 3,
+	file = insert(pdf.fn, c("response", "prop", "tmem"))
+);
+
+####
+
 colData(sca) <- DataFrame(cold);
 colData(x.p) <- DataFrame(cold);
 
@@ -1139,29 +1213,6 @@ qdraw(
 	width = 6, height = 6,
 	file = insert(pdf.fn, c("cd8-sel", "tsne", "response"))
 );
-
-
-tmem.clf <- qread("../data/etabm40_pamr.rds");
-
-x.sel.cd8.tmem.cl <- tmem.clf$predict(tmem.clf, logcounts(x.sel.cd8));
-
-x.sel.cd8.tmem.post <- tmem.clf$predict(tmem.clf, logcounts(x.sel.cd8), type="posterior");
-x.sel.cd8.tmem.post
-
-table(x.sel.cd8.tmem.cl)
-table(colData(x.sel.cd8)$response, x.sel.cd8.tmem.cl)
-
-prop.table(table(colData(x.sel.cd8)$response, x.sel.cd8.tmem.cl), margin=1)
-
-
-x.p.cd8 <- x.p[, colData(x.p)$t_cell == "CD8"];
-
-x.p.cd8.tmem.cl <- tmem.clf$predict(tmem.clf, logcounts(x.p.cd8));
-
-table(x.p.cd8.tmem.cl)
-table(colData(x.p.cd8)$response, x.p.cd8.tmem.cl)
-
-prop.table(table(colData(x.p.cd8)$response, x.p.cd8.tmem.cl), margin=1)
 
 
 # --- End T cells
