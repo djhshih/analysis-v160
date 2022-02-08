@@ -30,8 +30,8 @@ m_fix_table <- function(d) {
 		d$response <- factor(d$response, levels=levels.response);
 	}
 
-	if (!is.null(d$tmem_type)) {
-		d$tmem_type <- factor(d$tmem_type, levels=c("N", "CM", "EM", "EMRA"));	
+	if (!is.null(d$tmem_subset)) {
+		d$tmem_subset <- factor(d$tmem_subset, levels=c("N", "CM", "EM", "EMRA"));	
 	}
 
 	d
@@ -790,13 +790,13 @@ x.p.cd8 <- x.p[, ];
 
 x.p.cd8.tmem.cl <- tmem.clf$predict(tmem.clf, logcounts(x.p.cd8));
 
-cold$tmem_type <- factor(NA, levels=tmem.levels);
-cold$tmem_type[match(rownames(colData(x.p.cd8)), rownames(cold))] <- x.p.cd8.tmem.cl;
+cold$tmem_subset <- factor(NA, levels=tmem.levels);
+cold$tmem_subset[match(rownames(colData(x.p.cd8)), rownames(cold))] <- x.p.cd8.tmem.cl;
 
 table(x.p.cd8.tmem.cl)
-with(cold, table(tmem_type))
+with(cold, table(tmem_subset))
 table(colData(x.p.cd8)$response, x.p.cd8.tmem.cl)
-with(cold, table(response, tmem_type, t_cell))
+with(cold, table(response, tmem_subset, t_cell))
 
 tmem.ct <- table(colData(x.p.cd8)$response, x.p.cd8.tmem.cl);
 tmem.ct
@@ -807,7 +807,7 @@ fisher.test(tmem.ct[c("nonresponsive", "durable"), ])
 x.p.cd8.tmem.prop <- proportions(colData(x.p.cd8)$response, x.p.cd8.tmem.cl);
 
 x.p.cd8.tmem.prop <-
-	rename(x.p.cd8.tmem.prop, tmem_type = value, response = group) %>% 
+	rename(x.p.cd8.tmem.prop, tmem_subset = value, response = group) %>% 
 	m_fix_table();
 
 
@@ -831,7 +831,7 @@ lapply(tmem.levels,
 
 qdraw(
 	ggplot(x.p.cd8.tmem.prop,
-		aes(x=tmem_type, y=mean, ymin=lower, ymax=upper, fill=response)
+		aes(x=tmem_subset, y=mean, ymin=lower, ymax=upper, fill=response)
 	) +
 		theme_classic() + theme(strip.background = element_blank()) +
 		geom_col() + 
@@ -1090,6 +1090,14 @@ qdraw(
 );
 
 qdraw(
+	mod_rd_plot(plotUMAP(x.sel.cd8, colour_by="tmem_subset")) +
+
+	,
+	width = 6, height = 6,
+	file = insert(pdf.fn, c("cd8-sel", "umap", "cluster"))
+);
+
+qdraw(
 	mod_rd_plot(plotUMAP(x.sel.cd8, colour_by="CCR7"))
 	,
 	width = 6, height = 6,
@@ -1217,18 +1225,12 @@ qdraw(
 
 # --- End T cells
 
-colData(sca) <- DataFrame(cold);
 colData(x.p) <- DataFrame(cold);
+colData(sca) <- DataFrame(cold);
+
+qwrite(x.p, insert(rds.fn, "sce"));
+qwrite(sca, insert(rds.fn, "sca"));
 
 qwrite(cold, insert(rds.fn, "cells"));
 qwrite(mcold, insert(rds.fn, "features"));
-
-qwrite(x.p, insert(rds.fn, "sce"));
-
-sca.cd4 <- sca[, cold$t_cell == "CD4"];
-sca.cd8 <- sca[, cold$t_cell == "CD8"];
-
-qwrite(sca, insert(rds.fn, "sca"));
-qwrite(sca.cd4, insert(rds.fn, c("sca", "cd4")));
-qwrite(sca.cd8, insert(rds.fn, c("sca", "cd8")));
 
