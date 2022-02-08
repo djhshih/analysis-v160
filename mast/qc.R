@@ -853,6 +853,11 @@ qdraw(
 colData(sca) <- DataFrame(cold);
 colData(x.p) <- DataFrame(cold);
 
+####
+
+idx.nonzero <- pamr.predict(tmem.clf, threshold = tmem.clf$threshold.opt, type = "nonzero");
+tmem.clf.nonzero <- rownames(tmem.clf$centroids)[idx.nonzero];
+tmem.clf.gset.idx <- na.omit(match(tmem.clf.nonzero, mcold$Symbol));
 
 # --- Analyze the responsives clones
 
@@ -1053,12 +1058,15 @@ set.seed(1000);
 x.sel.cd8 <- x.p[, colData(x.p)$cluster %in% cl.sel & colData(x.p)$t_cell == "CD8"];
 #dec.sel.cd8 <- modelGeneVar(x.sel.cd8);
 #x.sel.cd8 <- denoisePCA(x.sel.cd8, dec.sel.cd8, subset.row=tmem.core.gset.idx);
-x.sel.cd8 <- fixedPCA(x.sel.cd8, rank=20, subset.row=tmem.core.gset.idx);
+x.sel.cd8 <- fixedPCA(x.sel.cd8, rank=20, subset.row=tcell.gset.idx);
+#x.sel.cd8 <- fixedPCA(x.sel.cd8, rank=20, subset.row=tmem.clf.gset.idx);
 #x.sel.cd8 <- runDiffusionMap(x.sel.cd8, dimred="PCA");
 x.sel.cd8 <- runUMAP(x.sel.cd8, dimred="PCA", n_neighbors=30);
 x.sel.cd8 <- runTSNE(x.sel.cd8, dimred="PCA");
 cl.cd8.n <- clusterCells(x.sel.cd8, use.dimred="UMAP",
-	BLUSPARAM = bluster::KmeansParam(centers=3));
+	BLUSPARAM = bluster::KmeansParam(centers=2));
+#cl.cd8.n <- clusterCells(x.sel.cd8, use.dimred="UMAP",
+#	BLUSPARAM = bluster::NNGraphParam(cluster.fun="louvain", k=20));
 table(cl.cd8.n)
 colLabels(x.sel.cd8) <- factor(cl.cd8.n);
 #cl2 <- factor(cl2.n, levels=c(2, 1, 3), labels=LETTERS[1:3]);
@@ -1071,6 +1079,13 @@ colLabels(x.sel.cd8) <- factor(cl.cd8.n);
 #	width = 6, height = 6,
 #	file = insert(pdf.fn, c("cd8-sel", "diffusion", "response"))
 #);
+
+qdraw(
+	mod_rd_plot(plotUMAP(x.sel.cd8, colour_by="label"))
+	,
+	width = 6, height = 6,
+	file = insert(pdf.fn, c("cd8-sel", "umap", "label"))
+);
 
 qdraw(
 	mod_rd_plot(plotUMAP(x.sel.cd8, colour_by="cluster")) +
@@ -1091,10 +1106,31 @@ qdraw(
 
 qdraw(
 	mod_rd_plot(plotUMAP(x.sel.cd8, colour_by="tmem_subset")) +
-
+		scale_colour_nejm()
 	,
 	width = 6, height = 6,
-	file = insert(pdf.fn, c("cd8-sel", "umap", "cluster"))
+	file = insert(pdf.fn, c("cd8-sel", "umap", "tmem"))
+);
+
+qdraw(
+	mod_rd_plot(plotUMAP(x.sel.cd8, colour_by="LEF1-AS1"))
+	,
+	width = 6, height = 6,
+	file = insert(pdf.fn, c("cd8-sel", "umap", "lef1-as1"))
+);
+
+qdraw(
+	mod_rd_plot(plotUMAP(x.sel.cd8, colour_by="ACTN1"))
+	,
+	width = 6, height = 6,
+	file = insert(pdf.fn, c("cd8-sel", "umap", "actn1"))
+);
+
+qdraw(
+	mod_rd_plot(plotUMAP(x.sel.cd8, colour_by="GAPDH"))
+	,
+	width = 6, height = 6,
+	file = insert(pdf.fn, c("cd8-sel", "umap", "gapdh"))
 );
 
 qdraw(
@@ -1200,6 +1236,92 @@ qdraw(
 	,
 	width = 6, height = 6,
 	file = insert(pdf.fn, c("cd8-sel", "umap", "ccr4"))
+);
+
+qdraw(
+	mod_rd_plot(plotUMAP(x.sel.cd8, colour_by="PGAM1"))
+	,
+	width = 6, height = 6,
+	file = insert(pdf.fn, c("cd8-sel", "umap", "pgam1"))
+);
+
+qdraw(
+	mod_rd_plot(plotUMAP(x.sel.cd8, colour_by="HK2"))
+	,
+	width = 6, height = 6,
+	file = insert(pdf.fn, c("cd8-sel", "umap", "hk2"))
+);
+
+qdraw(
+	mod_rd_plot(plotUMAP(x.sel.cd8, colour_by="PKM"))
+	,
+	width = 6, height = 6,
+	file = insert(pdf.fn, c("cd8-sel", "umap", "pkm"))
+);
+
+qdraw(
+	mod_rd_plot(plotUMAP(x.sel.cd8, colour_by="VSIR"))
+	,
+	width = 6, height = 6,
+	file = insert(pdf.fn, c("cd8-sel", "umap", "vsir"))
+);
+
+# CD107a
+qdraw(
+	mod_rd_plot(plotUMAP(x.sel.cd8, colour_by="LAMP1"))
+	,
+	width = 6, height = 6,
+	file = insert(pdf.fn, c("cd8-sel", "umap", "lamp1-cd107a"))
+);
+
+qdraw(
+	mod_rd_plot(plotUMAP(x.sel.cd8, colour_by="IL2"))
+	,
+	width = 6, height = 6,
+	file = insert(pdf.fn, c("cd8-sel", "umap", "il2"))
+);
+
+qdraw(
+	mod_rd_plot(plotUMAP(x.sel.cd8, colour_by="TNF"))
+	,
+	width = 6, height = 6,
+	file = insert(pdf.fn, c("cd8-sel", "umap", "tnf"))
+);
+
+qdraw(
+	mod_rd_plot(plotUMAP(x.sel.cd8, colour_by="IFNG"))
+	,
+	width = 6, height = 6,
+	file = insert(pdf.fn, c("cd8-sel", "umap", "ifng"))
+);
+
+# MIP-1beta
+qdraw(
+	mod_rd_plot(plotUMAP(x.sel.cd8, colour_by="CCL4"))
+	,
+	width = 6, height = 6,
+	file = insert(pdf.fn, c("cd8-sel", "umap", "ccl4"))
+);
+
+qdraw(
+	mod_rd_plot(plotUMAP(x.sel.cd8, colour_by="CCL4L2"))
+	,
+	width = 6, height = 6,
+	file = insert(pdf.fn, c("cd8-sel", "umap", "ccl4l2"))
+);
+
+qdraw(
+	mod_rd_plot(plotUMAP(x.sel.cd8, colour_by="XCL1"))
+	,
+	width = 6, height = 6,
+	file = insert(pdf.fn, c("cd8-sel", "umap", "xcl1"))
+);
+
+qdraw(
+	mod_rd_plot(plotUMAP(x.sel.cd8, colour_by="XCL2"))
+	,
+	width = 6, height = 6,
+	file = insert(pdf.fn, c("cd8-sel", "umap", "xcl2"))
 );
 
 
