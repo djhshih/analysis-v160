@@ -6,8 +6,9 @@ library(hgu133plus2barcodevecs)
 library(AnnotationDbi)
 library(hgu133plus2.db)
 library(pamr)
-library(switchBox)
+#library(switchBox)
 library(scran)
+library(mmalign)
 
 
 pheno0 <- qread("annot/E-TABM-40.sdrf.txt", type="tsv", comment="");
@@ -102,6 +103,7 @@ qdraw(
 )
 
 z.a.s0 <- z.a[rownames(z.a) %in% features.use, ];
+z.a.r0 <- percentile_within(z.a.s0);
 
 scores <- scoreMarkers(z.a.s0, pheno$group);
 marker.sets <- lapply(scores,
@@ -148,6 +150,8 @@ get_feature(z.a.r1, "GZMB")
 
 ####
 
+data0 <- list(x = z.a.s0, y = pheno$group);
+
 # select features that are different across groups
 
 data1 <- list(x = z.a.r1, y = pheno$group);
@@ -171,6 +175,8 @@ lapply(marker.sets, function(s) length(intersect(s, features.nonzero)) / length(
 grep("CCR", features.nonzero, value=TRUE)
 grep("GZM", features.nonzero, value=TRUE)
 
+
+####
 
 z.a.s2 <- z.a.s[idx.nonzero1, ];
 z.a.r2 <- percentile_within(z.a.s2);
@@ -238,7 +244,7 @@ features.nonzero <- rownames(data5$x)[idx.nonzero5];
 # select a model
 fit <- fit1;
 fit$threshold.opt <- threshold1;
-fit$predict <- function(fit, x, type="class") {
+fit$predict <- function(fit, x, type="class", ...) {
 	library(pamr)
 
 	# extract relevant features from data matrix x
@@ -257,7 +263,7 @@ fit$predict <- function(fit, x, type="class") {
 		}
 	)
 
-	pamr.predict(fit, x, threshold = fit$threshold.opt, type=type)
+	pamr.predict(fit, x, threshold = fit$threshold.opt, type=type, ...)
 }
 
 rownames(fit$centroids)
@@ -276,5 +282,158 @@ qwrite(fit, insert(rds.fn, "pamr"));
 
 ####
 
+pc1 <- pca(data1$x, center.features=FALSE);
+
+data1.pc <- list(x=pca_transform(data1$x, pc1)$Z, y = pheno$group);
+
+fit1.pc <- pamr.train(data1.pc);
+fit1.pc
+
+cv1.pc <- pamr.cv(fit1.pc, data1.pc);
+cv1.pc
+
+# minimum threshold with the minimum error
+threshold1.pc <- max(cv1.pc$threshold[cv1.pc$error == min(cv1.pc$error)]);
+
+yhat <- pamr.predict(fit1.pc, data1.pc$x, threshold = threshold1.pc);
+table(yhat, y=pheno$group)
+
+pc <- pca(data1$x);
+qdraw(
+	pca_plot(pc, mapping=aes(colour=data1$y))
+	,
+	file = insert(pdf.fn, c("pca", "markers"))
+)
+
+# select a model
+fit <- fit1.pc;
+fit$threshold.opt <- threshold1.pc;
+fit$features <- rownames(data1$x);
+fit$pc <- pc1;
+fit$predict <- function(fit, x, type="class", ...) {
+	library(pamr)
+	library(mmalign)
+
+	# extract relevant features from data matrix x
+	idx <- match(fit$features, rownames(x));
+	stopifnot(!is.na(idx));
+	x <- x[idx, ];
+
+	# apply rank transformation
+	x <- apply(x, 2,
+		function(z) {
+			idx <- which(z > 0);
+			out <- numeric(length(z));
+			out[idx] <- rank(z[idx], ties.method="average") / length(idx);
+			out
+		}
+	)
+
+	z <- pca_transform(x, fit$pc)$Z;
+
+	pamr.predict(fit, z, threshold = fit$threshold.opt, type=type, ...)
+}
+
+yhat <- fit$predict(fit, data1$x);
+table(yhat, y=pheno$group)
+
+qwrite(fit, insert(rds.fn, "pca-pamr"));
+
+####
+
 #SWAP.Train.KTSP(data1$x, data1$y)
+
+####
+
+library(MASS)
+
+fit.lda <- lda(t(data1$x), data1$y);
+yhat <- predict(fit.lda, t(data1$x));
+table(yhat$class, y=pheno$group)
+
+####
+
+library(glmnet)
+cv.lasso <- cv.glmnet(t(data1$x), data1$y, family="multinomial");
+fit.lasso <- glmnet(t(data1$x), data1$y, family="multinomial", type.multinomial="grouped", lambda = cv.lasso$lambda.min);
+yhat <- predict(fit.lasso, s = cv.lasso$lambda.min, t(data1$x), type="class");
+table(yhat, y=pheno$group)
+
+nonzero.idx <- unlist(predict(fit.lasso, s = cv.lasso$lambda.min, type="nonzero"));
+nonzero <- rownames(fit.lasso$beta[[1]])[nonzero.idx];
+
+fit <- fit.lasso;
+fit$threshold.opt <- fit$lambda.min;
+fit$predict <- function(fit, x, type="class", ...) {
+	library(glmnet)
+
+	# extract relevant features from data1 matrix x
+	features <- rownames(fit$beta[[1]]);
+	idx <- match(features, rownames(x));
+	stopifnot(!is.na(idx));
+	x <- x[idx, ];
+
+	# apply rank transformation
+	x <- apply(x, 2,
+		function(z) {
+			idx <- which(z > 0);
+			out <- numeric(length(z));
+			out[idx] <- rank(z[idx], ties.method="average") / length(idx);
+			out
+		}
+	)
+
+	factor(
+		predict(fit, t(x), s = fit$threshold.opt, type=type, ...),
+		levels = c("N", "CM", "EM", "EMRA")
+	)
+}
+
+yhat <- fit$predict(fit, data1$x);
+table(yhat, y=data1$y)
+
+qwrite(fit, insert(rds.fn, "glasso"));
+
+####
+
+gsets <- lapply(scores,
+	function(s)
+		rownames(s)[
+			s$max.AUC > 0.9 &
+			s$mean.AUC > 0.8 &
+			s$max.logFC.cohen > 3 &
+			s$mean.logFC.cohen > 1
+		]
+);
+
+gsets <- lapply(scores,
+	function(s) {
+		s <- s[order(s$mean.logFC.cohen), ];
+		gset <- rownames(s)[
+			s$max.AUC > 0.6 &
+			s$min.AUC > 0.5 &
+			s$mean.AUC > 0.6 &
+			s$max.logFC.cohen > 1 &
+			s$min.logFC.cohen > 0 &
+			s$mean.logFC.cohen > 1
+		];
+		head(gset, 100)
+	}
+);
+str(gsets)
+
+gset.scores <- matrix(unlist(lapply(gsets,
+	function(gset) {
+		colMeans(data0$x[gset, ])
+		#colMeans(data0$x[gset, ]) - colMeans(data0$x[!rownames(data0$x) %in% gset, ])
+	}
+)), nrow=ncol(data0$x));
+rownames(gset.scores) <- colnames(data0$x);
+colnames(gset.scores) <- names(gsets);
+
+yhat <- factor(
+	names(gsets)[apply(gset.scores, 1, which.max)],
+	levels = names(gsets)
+);
+table(yhat, y=data0$y)
 
