@@ -26,6 +26,10 @@ m_fix_table <- function(d) {
 		d$label <- factor(d$label, levels=sort(as.integer(unique(d$label))));
 	}
 
+	if (!is.null(d$cluster)) {
+		d$cluster <- factor(d$cluster, levels=sort(as.integer(unique(d$cluster))));
+	}
+
 	if (!is.null(d$response)) {
 		d$response <- factor(d$response, levels=levels.response);
 	}
@@ -248,12 +252,12 @@ markers.p.sel <- lapply(markers.p,
 		idx <- rownames(d) %in% tcell.gset;
 		d.f <- d[idx, ];
 		#d.f <- d;
-		d.f <- d.f[d.f$mean.AUC > 0.5, ];
+		d.f <- d.f[d.f$mean.AUC > 0.7, ];
 		d.f[order(d.f$mean.logFC.cohen, decreasing=TRUE), ]
 	}
 );
 
-print(lapply(markers.p.sel, function(x) as.data.frame(x[1:10, 1:4])))
+print(lapply(markers.p.sel, function(x) as.data.frame(head(x[, 1:4], 20))))
 # cluster 1 is NKG2D+ CD8+ T cells
 # cluster 4 contains FOXP3+ Treg cells
 # cluster 5 and 8 are Th2 cells: CD4+ CXCR4+ CCR4+ GATA3+,
@@ -264,9 +268,92 @@ print(lapply(markers.p.sel, function(x) as.data.frame(x[1:10, 1:4])))
 # cluster 11 is CD8+ effector T cells expressing GZMB, GZMA, PRF1, TNF, IFNG
 # all clusters express TCR, mostly alpha-beta
 
-as.data.frame(markers.p.sel[[7]][1:100, 1:4])
+top.n <- markers.p.sel
 
-as.data.frame(markers.p.sel[[11]][1:100, 1:4])
+with(cold, prop.table(table(tmem_subset, cluster), margin=2))
+
+# T-bet (TBX21)
+gsets.to.plot <- list(
+	"Activation" = c("CD28", "CD27", "CD99", "TIGIT", "EOMES"),
+	"Memory" = c("PTPRC", "CCR7", "IL7R", "SELL", "TCF7", "LEF1", "CXCR3"),
+	"Cytokines" = c("IFNG", "TNF", "IL2", "CCL5", "XCL1", "TNFSF14"),
+	"Cytotoxicity" = c("NKG7", "PRF1", "GZMB", "GZMH", "CRTAM"),
+	"CD4 & CD8" = c("CD4", "CD8A", "CD8B"),
+	"Th1" = c("IRF1", "IL27RA", "TBX21"),
+	"Th2" = c("CXCR4", "CCR4", "GATA3"),
+	#"Treg" = c("FOXP3", "SOCS1", "CD69"),
+	"Treg" = c("FOXP3"),
+	"NF-kappaB signaling" = c("REL", "RELB", "BCL3", "NFKBID"),
+	"Inhibitory" = c("VSIR", "SLAMF7", "LAPTM5", "CBLB", "FAS"),
+	#"Ribosomal" = c("RPL22", "RPS3", "RPS6"),
+	#"Other" = c("CD74", "B2M", "ANXA1", "CORO1A", "RAC2", "LCP1", "BATF")
+	"Other" = c("ANXA1", "CORO1A", "RAC2", "LCP1", "BATF")
+);
+genes.to.plot <- unlist(gsets.to.plot);
+
+cl.expr.stats <- do.call(rbind, mapply(
+	function(m, k) {
+		d <- data.frame(
+			cluster = k,
+			gene = genes.to.plot,
+			logfc = m[genes.to.plot, "self.average"] - m[genes.to.plot, "other.average"],
+			expressed = m[genes.to.plot, "self.detected"],
+			gset = factor(
+				unlist(mapply(rep, names(gsets.to.plot), lapply(gsets.to.plot, length))),
+				levels = names(gsets.to.plot)
+			)
+		);
+		rownames(d) <- NULL;
+
+
+		d
+	},
+	markers.p,
+	names(markers.p),
+	SIMPLIFY = FALSE
+));
+rownames(cl.expr.stats) <- NULL;
+cl.expr.stats <- m_fix_table(cl.expr.stats);
+
+qdraw(
+	ggplot(cl.expr.stats,
+		aes(x = cluster, y = gene, colour = bound(logfc, c(-2.5, 2.5)), size = expressed)
+	) +
+		theme_classic() +
+		geom_point() +
+		facet_grid(gset ~ ., scales="free_y", space="free") +
+		scale_colour_gradient(breaks = (-1):2, low="grey90", high="orangered2") +
+		guides(
+			colour = guide_colourbar("log FC"),
+			size = guide_legend("% expressed")
+		) +
+		theme(
+			strip.text.y = element_text(angle = 0, hjust=0),
+			strip.background = element_blank(),
+			axis.ticks.y = element_blank(),
+			axis.ticks.x = element_blank()
+		) +
+		scale_size_continuous(range = c(-0.5, 3.5)) +
+		scale_y_discrete(limits = rev) +
+		ylab("")
+	,
+	width = 5, height = 10,
+	file = insert(pdf.fn, c("pruned", "gene-expr"))
+)
+
+
+expr.cut <- 0;
+
+alpha.beta <-
+	logcounts(x.p)["TRAC", ] > expr.cut | 
+	logcounts(x.p)["TRBC1", ] > expr.cut | logcounts(x.p)["TRBC2", ] > expr.cut;
+
+gamma.delta <- 
+	logcounts(x.p)["TRGC1", ] > expr.cut | logcounts(x.p)["TRGC2", ] > expr.cut |
+	logcounts(x.p)["TRDC", ] > expr.cut;
+
+table(alpha.beta, gamma.delta)
+cor(alpha.beta, gamma.delta)
 
 #genes.to.plot <- c("CCL5", "NKG7", "PRF1", "GZMB", "XCL1", "CRTAM", "VSIR", "PDCD1");
 #genes.to.plot <- c("FOXP3", "CD4", "CD8A", "TRAC", "TRDC", "TNF", "IFNG", "LAMP1", "ANXA1");
@@ -782,13 +869,19 @@ qdraw(
 # ---
 
 tmem.clf <- qread("../data/etabm40_pamr.rds");
+#tmem.clf <- qread("../data/etabm40_pca-pamr.rds");
+#tmem.clf <- qread("../data/etabm40_glasso.rds");
+#tmem.cl.prior <- c(N=0.74, CM=0.05, EM=0.05, EMRA=0.16);
 tmem.levels <- levels(tmem.clf$y);
 names(tmem.levels) <- tmem.levels;
 
 cd8.idx <- colData(x.p)$t_cell == "CD8";
-x.p.cd8 <- x.p[, ];
+x.p.cd8 <- x.p[, cd8.idx];
 
-x.p.cd8.tmem.cl <- tmem.clf$predict(tmem.clf, logcounts(x.p.cd8));
+x.p.cd8.tmem.cl <- tmem.clf$predict(
+	#tmem.clf, logcounts(x.p.cd8), prior=tmem.cl.prior
+	tmem.clf, logcounts(x.p.cd8)
+);
 
 cold$tmem_subset <- factor(NA, levels=tmem.levels);
 cold$tmem_subset[match(rownames(colData(x.p.cd8)), rownames(cold))] <- x.p.cd8.tmem.cl;
@@ -855,7 +948,10 @@ colData(x.p) <- DataFrame(cold);
 
 ####
 
-idx.nonzero <- pamr.predict(tmem.clf, threshold = tmem.clf$threshold.opt, type = "nonzero");
+idx.nonzero <- pamr.predict(tmem.clf,
+	threshold = tmem.clf$threshold.opt,
+	type = "nonzero"
+);
 tmem.clf.nonzero <- rownames(tmem.clf$centroids)[idx.nonzero];
 tmem.clf.gset.idx <- na.omit(match(tmem.clf.nonzero, mcold$Symbol));
 
