@@ -923,7 +923,7 @@ lapply(tmem.levels,
 )
 
 qdraw(
-	ggplot(x.p.cd8.tmem.prop,
+	ggplot(x.p.cd8.tmem.prop[x.p.cd8.tmem.prop$response != "nonresponsive", ],
 		aes(x=tmem_subset, y=mean, ymin=lower, ymax=upper, fill=response)
 	) +
 		theme_classic() + theme(strip.background = element_blank()) +
