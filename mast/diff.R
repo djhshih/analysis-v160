@@ -10,14 +10,156 @@ options(mc.cores=128);
 
 set.seed(1337);
 
+csv.fdr.cut <- 0.25;
 fdr.cut <- 0.05;
+
+gene_logfc <- function(sca, groups, genes=NULL) {
+	group.levels <- levels(groups);
+	names(group.levels) <- group.levels;
+	means <- lapply(group.levels, function(g) {
+		idx <- which(groups == g);
+		if (is.null(genes)) {
+			rowMeans(logcounts(sca)[, idx, drop=FALSE])
+		} else {
+			rowMeans(logcounts(sca)[genes, idx, drop=FALSE])
+		}
+	});
+	means[[2]] - means[[1]]
+}
+
+wd_summary_table <- function(wd, logfc, genes=NULL) {
+	d <- data.frame(
+		gene = rownames(wd),
+		logfc = logfc,
+		discrete_p = wd[, "disc", "Pr(>Chisq)"],
+		continuous_p = wd[, "cont", "Pr(>Chisq)"],
+		hurdle_p = wd[, "hurdle", "Pr(>Chisq)"]
+	);
+
+	if (!is.null(genes)) {
+		d <- d[match(genes, d$gene), ];
+	}
+
+	d$discrete_q <- p.adjust(d$discrete_p, "BH");
+	d$continuous_q <- p.adjust(d$continuous_p, "BH");
+	d$hurdle_q <- p.adjust(d$hurdle_p, "BH");
+
+	d[order(d$hurdle_p, -abs(d$logfc)), ]
+}
+
+volcano_limits <- function() {
+	list(
+		xlim(-3, 3),
+		scale_y_continuous(trans=revlog_trans(), name="FDR", limits=c(1, 1e-15), breaks=c(1, 0.05, 1e-3, 1e-6, 1e-9, 1e-12, 1e-15))
+	)
+}
+
+wd_results_plot <- function(d, fdr.cut=0.05, n.top=30, n.ns=500) {
+	d$group <- ifelse(
+		d$hurdle_q < fdr.cut,
+		ifelse(d$logfc > 0, "Up", "Down"),
+		"NS"
+	);
+
+	d <- d[order(d$hurdle_q), ];
+	d$label <- NA;
+	d$label[1:n.top] <- d$gene[1:n.top];
+	d$label[d$group == "NS"] <- NA;
+
+	# downsample NS
+	sig.idx <- which(d$group != "NS");
+	if (sum(d$group == "NS", na.rm=TRUE) > n.ns) {
+		ns.idx <- which(d$group == "NS");
+		prob <- -log(pmin(d$hurdle_q[ns.idx], 0.999));
+		valid <- !is.na(prob) & prob > 0;
+
+		idx.valid <- ns.idx[valid];
+		n.valid <- length(idx.valid);
+		if (n.valid >= n.ns) {
+			idx <- union(sig.idx, sample(idx.valid, n.ns, prob=prob[valid]));
+		} else {
+			idx <- union(sig.idx, which(idx.valid));
+		}
+	}
+
+	ggplot(d[idx, ],
+		aes(
+			x=discrete_q, y=continuous_q, colour=group
+		)
+	) +
+		theme_classic() +
+		geom_point(alpha=0.3) +
+		scale_colour_manual(values=c(NS="grey30", Up="firebrick3", Down="royalblue4")) +
+		geom_text_repel(aes(label=label), colour="black", show.legend=FALSE) +
+		scale_x_continuous(trans=revlog_trans(), name="FDR of discrete component") +
+		scale_y_continuous(trans=revlog_trans(), name="FDR of continuous component")
+}
+
+volcano_plot <- function(d, fdr.cut=0.05, n.top=30, n.ns=500) {
+	d$group <- ifelse(
+		d$q < fdr.cut,
+		ifelse(d$logfc > 0, "Up", "Down"),
+		"NS"
+	);
+
+	d <- d[order(d$hurdle_q), ];
+	d$label <- NA;
+	d$label[1:n.top] <- d$gene[1:n.top];
+	d$label[d$group == "NS"] <- NA;
+	
+	# downsample NS
+	sig.idx <- which(d$group != "NS");
+	if (sum(d$group == "NS", na.rm=TRUE) > n.ns) {
+		ns.idx <- which(d$group == "NS");
+		prob <- -log(pmin(d$hurdle_q[ns.idx], 0.999));
+		valid <- !is.na(prob) & prob > 0;
+
+		idx.valid <- ns.idx[valid];
+		n.valid <- length(idx.valid);
+		if (n.valid >= n.ns) {
+			idx <- union(sig.idx, sample(idx.valid, n.ns, prob=prob[valid]));
+		} else {
+			idx <- union(sig.idx, which(idx.valid));
+		}
+	}
+
+	ggplot(d[idx, ],
+		aes(
+			x=logfc, y=q, colour=group
+		)
+	) +
+		theme_classic() +
+		geom_vline(xintercept=0, colour="grey60") +
+		geom_hline(yintercept=0.05, colour="grey60") +
+		geom_point(, alpha=0.3) +
+		guides(colour="none") +
+		scale_colour_manual(values=c(NS="grey30", Up="firebrick3", Down="royalblue4")) +
+		geom_text_repel(aes(label=label), colour="black", show.legend=FALSE) +
+		scale_alpha_continuous(trans=revlog_trans(), name="FDR") +
+		scale_y_continuous(trans=revlog_trans(), name="FDR") +
+		scale_x_continuous(name="log FC")
+}
+
+sanitize <- function(x) {
+	gsub(".", "-", x, fixed=TRUE)
+}
+
+
 
 in.fn <- as.filename("v160_sca.rds");
 mcold <- qread("v160_features.rds");
 
 out.fn <- filename(in.fn$fstem, tag=setdiff(in.fn$tag, "sca"));
 rds.fn <- insert(out.fn, ext="rds");
+csv.fn <- insert(out.fn, ext="csv");
 pdf.fn <- insert(out.fn, ext="pdf");
+
+# ignore TCR variable genes
+genes.tcrv <- grep("^TR(A|B|G)V[0-9]*", rownames(sca), value=TRUE);
+genes.ribo <- grep("^RP((LP)|L|S)[0-9]+[A-Z]?", rownames(sca), value=TRUE);
+genes.ignore <- c(genes.tcrv, genes.ribo);
+genes <- setdiff(rownames(sca), genes.ignore);
+
 
 sca <- qread(in.fn);
 
@@ -84,19 +226,6 @@ compare_sets(sgenes.wd)
 sgenes.wd.disc <- lapply(wd, function(x) extract_sig_genes(x, component="disc"));
 compare_sets(sgenes.wd.disc)
 
-gene_logfc <- function(sca, groups, genes=NULL) {
-	group.levels <- levels(groups);
-	names(group.levels) <- group.levels;
-	means <- lapply(group.levels, function(g) {
-		idx <- which(groups == g);
-		if (is.null(genes)) {
-			rowMeans(logcounts(sca)[, idx, drop=FALSE])
-		} else {
-			rowMeans(logcounts(sca)[genes, idx, drop=FALSE])
-		}
-	});
-	means[[2]] - means[[1]]
-}
 
 response.contrasts <- list(
 	durable = c("nonresponsive", "durable"),
@@ -116,89 +245,11 @@ logfcs <- mapply(
 );
 
 wd.ds <- mapply(
-	function(d, logfc) {
-		data.frame(
-			gene = rownames(d),
-			logfc = logfc,
-			discrete_q = p.adjust(d[, "disc", "Pr(>Chisq)"], "BH"),
-			continuous_q = p.adjust(d[, "cont", "Pr(>Chisq)"], "BH"),
-			hurdle_q = p.adjust(d[, "hurdle", "Pr(>Chisq)"], "BH")
-		)
-	},
+	function(d, logfc) wd_summary_table(d, logfc, genes=genes),
 	wd,
 	logfcs,	
 	SIMPLIFY = FALSE
 );
-
-wd_results_plot <- function(d, fdr.cut=0.05, n.top=30, n.ns=500) {
-	d$group <- ifelse(
-		d$hurdle_q < fdr.cut,
-		ifelse(d$logfc > 0, "Up", "Down"),
-		"NS"
-	);
-
-	d <- d[order(d$hurdle_q), ];
-	d$label <- NA;
-	d$label[1:n.top] <- d$gene[1:n.top];
-	d$label[d$group == "NS"] <- NA;
-
-	# downsample NS
-	sig.idx <- which(d$group != "NS");
-	prob <- -log(d$hurdle_q);
-	prob[is.na(prob)] <- 0;
-	idx <- union(sig.idx, sample(1:nrow(d), n.ns, prob=prob));
-
-	ggplot(d[idx, ],
-		aes(
-			x=discrete_q, y=continuous_q, colour=group
-		)
-	) +
-		theme_classic() +
-		geom_point(alpha=0.3) +
-		scale_colour_manual(values=c(NS="grey30", Up="firebrick3", Down="royalblue4")) +
-		geom_text_repel(aes(label=label), colour="black", show.legend=FALSE) +
-		scale_x_continuous(trans=revlog_trans(), name="FDR of discrete component") +
-		scale_y_continuous(trans=revlog_trans(), name="FDR of continuous component")
-}
-
-volcano_plot <- function(d, fdr.cut=0.05, n.top=30, n.ns=500) {
-	d$group <- ifelse(
-		d$q < fdr.cut,
-		ifelse(d$logfc > 0, "Up", "Down"),
-		"NS"
-	);
-
-	d <- d[order(d$hurdle_q), ];
-	d$label <- NA;
-	d$label[1:n.top] <- d$gene[1:n.top];
-	d$label[d$group == "NS"] <- NA;
-	
-	# downsample NS
-	sig.idx <- which(d$group != "NS");
-	prob <- -log(d$q);
-	prob[is.na(prob)] <- 0;
-	idx <- union(sig.idx, sample(1:nrow(d), n.ns, prob=prob));
-
-	ggplot(d[idx, ],
-		aes(
-			x=logfc, y=q, colour=group
-		)
-	) +
-		theme_classic() +
-		geom_vline(xintercept=0, colour="grey60") +
-		geom_hline(yintercept=0.05, colour="grey60") +
-		geom_point(, alpha=0.3) +
-		guides(colour="none") +
-		scale_colour_manual(values=c(NS="grey30", Up="firebrick3", Down="royalblue4")) +
-		geom_text_repel(aes(label=label), colour="black", show.legend=FALSE) +
-		scale_alpha_continuous(trans=revlog_trans(), name="FDR") +
-		scale_y_continuous(trans=revlog_trans(), name="FDR") +
-		scale_x_continuous(name="log FC")
-}
-
-sanitize <- function(x) {
-	gsub(".", "-", x, fixed=TRUE)
-}
 
 components <- c("hurdle", "discrete", "continuous");
 
@@ -225,11 +276,234 @@ for (stratum in names(wd.ds)) {
 	);
 }
 
+for (stratum in names(wd.ds)) {
+	qwrite(wd.ds[[stratum]], 
+		file = insert(rds.fn, c("wd", sanitize(stratum)))
+	)
+	qwrite(filter(wd.ds[[stratum]], hurdle_q < csv.fdr.cut), 
+		file = insert(csv.fn, c("wd", sanitize(stratum)))
+	)
+}
 
 spids.lr <- extract_sig_genes(lr);
 sgenes.lr <- pid_to_genes(spids.lr);
 qwrite(sgenes.lr, insert(out.fn, c("lr", "sig-genes"), ext="vtr"));
 
-coefs.sig <- coefs[match(spids.lr, coefs$primerid), ];
-sca.d.sig <- as(sca[spids.lr, ], "data.table");
+# ----
+
+with(colData(sca), table(response, t_cell))
+
+with(colData(sca), table(cluster2, response, t_cell))
+
+
+# durable C vs. nonresponsive C: nothing
+
+sca.c <- sca[, which(colData(sca)$cluster2 == "C")];
+zfit.c <- zlm(~ response, sca.c);
+wd.c.durable <- waldTest(zfit.c, Hypothesis("responsedurable", c("(Intercept)", "responsedurable")));
+logfc.c.durable <- gene_logfc(sca.c, factor(colData(sca.c)$response, c("nonresponsive", "durable")));
+d.c.durable <- wd_summary_table(wd.c.durable, logfc.c.durable, genes);
+
+qdraw(
+	volcano_plot(mutate(d.c.durable, q=hurdle_q)) + volcano_limits(),
+	width = 5,
+	file = insert(pdf.fn, c("wd", "cluster2-c", "durable", "volcano", "hurdle"))
+);
+
+qwrite(
+	filter(d.c.durable, hurdle_q < csv.fdr.cut),
+	file = insert(csv.fn, c("wd", "cluster2-c", "durable"))
+)
+
+
+# durable B vs. nonresponsive B: nothing
+
+sca.b <- sca[, which(colData(sca)$cluster2 == "B")];
+zfit.b <- zlm(~ response, sca.b);
+wd.b.durable <- waldTest(zfit.b, Hypothesis("responsedurable", c("(Intercept)", "responsedurable")));
+logfc.b.durable <- gene_logfc(sca.b, factor(colData(sca.b)$response, c("nonresponsive", "durable")));
+d.b.durable <- wd_summary_table(wd.b.durable, logfc.b.durable, genes);
+
+qdraw(
+	volcano_plot(mutate(d.b.durable, q=hurdle_q)) + volcano_limits(),
+	width = 5,
+	file = insert(pdf.fn, c("wd", "cluster2-b", "durable", "volcano", "hurdle"))
+);
+
+qwrite(
+	filter(d.b.durable, hurdle_q < csv.fdr.cut),
+	file = insert(pdf.fn, c("wd", "cluster2-b", "durable"))
+);
+
+
+# transient A vs. nonresponsive A: nothing
+
+sca.a <- sca[, which(colData(sca)$cluster2 == "A")];
+zfit.a <- zlm(~ response, sca.a);
+wd.a.transient <- waldTest(zfit.a, Hypothesis("responsetransient", c("(Intercept)", "responsetransient")));
+logfc.a.transient <- gene_logfc(sca.a, factor(colData(sca.a)$response, c("nonresponsive", "transient")));
+d.a.transient <- wd_summary_table(wd.a.transient, logfc.a.transient, genes);
+
+qdraw(
+	volcano_plot(mutate(d.a.transient, q=hurdle_q)) + volcano_limits(),
+	width = 5,
+	file = insert(pdf.fn, c("wd", "cluster2-a", "transient", "volcano", "hurdle"))
+);
+
+qwrite(
+	filter(d.a.transient, hurdle_q < csv.fdr.cut),
+	file = insert(pdf.fn, c("wd", "cluster2-a", "transient"))
+);
+
+
+# CD8+ durable C vs. CD8+ durable B: many differentially expressed genes
+# GZMB, XCL1, XCL2, CCL4, CCL4L2
+# PGAM1, PKM, GAPDH, 
+# HSP90AB1, HSPA8
+# GNAS, BCL2A1, EIF4A1
+
+sca.durable.bc <- sca[,
+	which(
+		colData(sca)$t_cell == "CD8" &
+		colData(sca)$response == "durable" & 
+		colData(sca)$cluster2 %in% c("B", "C")
+	)
+];
+with(colData(sca.durable.bc), table(response, cluster2))
+colData(sca.durable.bc)$cluster2 <- factor(colData(sca.durable.bc)$cluster2, levels=c("B", "C"));
+zfit.durable.bc <- zlm(~ cluster2, sca.durable.bc);
+wd.durable.bc <- waldTest(zfit.durable.bc, Hypothesis("cluster2C", c("(Intercept)", "cluster2C")));
+logfc.durable.bc <- gene_logfc(sca.durable.bc, factor(colData(sca.durable.bc)$cluster2, c("B", "C")));
+d.durable.bc <- wd_summary_table(wd.durable.bc, logfc.durable.bc, genes);
+
+qdraw(
+	volcano_plot(mutate(d.durable.bc, q=hurdle_q)),
+	width = 5,
+	file = insert(pdf.fn, c("wd", "cd8", "durable", "c-vs-b", "volcano", "hurdle"))
+);
+
+qdraw(
+	wd_results_plot(d.durable.bc)
+	,
+	width = 6,
+	file = insert(pdf.fn, c("wd", "cd8", "durable", "c-vs-b", "disc-cont-fdr"))
+);
+
+qwrite(
+	filter(d.durable.bc, hurdle_q < csv.fdr.cut),
+	file = insert(csv.fn, c("wd", "cd8", "durable", "c-vs-b"))
+);
+
+
+# CD8+ durable vs. CD8+ nonresponsive
+
+wd.cd8.durable <- waldTest(zfit.cd8, Hypothesis("responsedurable", c("(Intercept)", "responsedurable")));
+logfc.cd8.durable <- gene_logfc(sca.cd8, factor(colData(sca.cd8)$response, c("nonresponsive", "durable")));
+d.cd8.durable <- wd_summary_table(wd.cd8.durable, logfc.cd8.durable, genes);
+
+qdraw(
+	volcano_plot(mutate(d.cd8.durable, q=hurdle_q)),
+	width = 5,
+	file = insert(pdf.fn, c("wd", "cd8", "durable", "volcano", "hurdle"))
+);
+
+qdraw(
+	wd_results_plot(d.cd8.durable)
+	,
+	width = 6,
+	file = insert(pdf.fn, c("wd", "cd8", "durable", "disc-cont-fdr"))
+);
+
+qwrite(
+	filter(d.cd8.durable, hurdle_q < csv.fdr.cut),
+	file = insert(csv.fn, c("wd", "cd8", "durable"))
+);
+
+
+# CD4+ transient vs. CD4+ nonresponsive: nothing
+
+sca.cd4 <- sca[, which(colData(sca)$t_cell == "CD4")];
+zfit.cd4 <- zlm(~ response, sca.cd4);
+
+wd.cd4.transient <- waldTest(zfit.cd4, Hypothesis("responsetransient", c("(Intercept)", "responsetransient")));
+logfc.cd4.transient <- gene_logfc(sca.cd4, factor(colData(sca.cd4)$response, c("nonresponsive", "transient")));
+d.cd4.transient <- wd_summary_table(wd.cd4.transient, logfc.cd4.transient, genes);
+
+options(ggrepel.max.overlaps=20)
+qdraw(
+	volcano_plot(mutate(d.cd4.transient, q=hurdle_q)) + 
+		scale_y_continuous(trans=revlog_trans(), name="FDR", limits=c(1, 1e-3), breaks=c(1, 0.05, 0.01, 1e-3))
+	,
+	width = 5,
+	file = insert(pdf.fn, c("wd", "cd4", "transient", "volcano", "hurdle"))
+);
+
+qdraw(
+	wd_results_plot(d.cd4.transient)
+	,
+	width = 6,
+	file = insert(pdf.fn, c("wd", "cd4", "transient", "disc-cont-fdr"))
+);
+
+qwrite(
+	filter(d.cd4.transient, hurdle_q < csv.fdr.cut),
+	file = insert(csv.fn, c("wd", "cd4", "transient"))
+);
+
+
+# CD8+ durable vs. CD8+ transient
+
+sca.cd8 <- sca[, which(colData(sca)$t_cell == "CD8")];
+zfit.cd8 <- zlm(~ response, sca.cd8);
+
+wd.cd8.durable.t <- waldTest(zfit.cd8, Hypothesis("responsedurable-responsetransient", c("responsetransient", "responsedurable")));
+logfc.cd8.durable.t <- gene_logfc(sca.cd8, factor(colData(sca.cd8)$response, c("transient", "durable")));
+d.cd8.durable.t <- wd_summary_table(wd.cd8.durable.t, logfc.cd8.durable.t, genes);
+
+qdraw(
+	volcano_plot(mutate(d.cd8.durable.t, q=hurdle_q)),
+	width = 5,
+	file = insert(pdf.fn, c("wd", "cd8", "durable-vs-transient", "volcano", "hurdle"))
+);
+
+qdraw(
+	wd_results_plot(d.cd8.durable.t)
+	,
+	width = 6,
+	file = insert(pdf.fn, c("wd", "cd8", "durable-vs-transient", "disc-cont-fdr"))
+);
+
+qwrite(
+	filter(d.cd8.durable.t, hurdle_q < csv.fdr.cut),
+	file = insert(csv.fn, c("wd", "cd8", "durable-vs-transient"))
+);
+
+
+# CD8+ durable non-C vs. CD8+ transient non-C
+
+sca.cd8.nonc <- sca[, which(colData(sca)$t_cell == "CD8" & colData(sca)$cluster2 != "C")];
+zfit.cd8.nonc <- zlm(~ response, sca.cd8.nonc);
+wd.cd8.nonc.durable <- waldTest(zfit.cd8.nonc, Hypothesis("responsedurable-responsetransient", c("responsetransient", "responsedurable")));
+logfc.cd8.nonc.durable <- gene_logfc(sca.cd8.nonc, factor(colData(sca.cd8.nonc)$response, c("transient", "durable")));
+d.cd8.nonc.durable <- wd_summary_table(wd.cd8.nonc.durable, logfc.cd8.nonc.durable, genes);
+
+qdraw(
+	volcano_plot(mutate(d.cd8.nonc.durable, q=hurdle_q)) + volcano_limits(),
+	width = 5,
+	file = insert(pdf.fn, c("wd", "cd8", "non-c", "durable-vs-transient", "volcano", "hurdle"))
+);
+
+qdraw(
+	wd_results_plot(d.cd8.nonc.durable)
+	,
+	width = 6,
+	file = insert(pdf.fn, c("wd", "cd8", "non-c", "durable-vs-transient", "disc-cont-fdr"))
+);
+
+qwrite(
+	filter(d.cd8.nonc.durable, hurdle_q < csv.fdr.cut),
+	file = insert(csv.fn, c("wd", "cd8", "non-c", "durable-vs-transient"))
+);
+
+# ----
 
