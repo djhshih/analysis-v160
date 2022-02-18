@@ -98,22 +98,27 @@ x <- addPerCellQC(x, subsets = ctrl.features);
 lib.factors <- librarySizeFactors(x);
 
 qdraw(
-	with(colData(x),
-		hist(total, breaks=100)
-	),
+	{
+		with(colData(x),
+			hist(total, breaks=100)
+		)
+	},
 	file = insert(pdf.fn, c("qc", "total"))
 );
 
 qdraw(
-	hist(lib.factors, breaks=200, xlim=c(0, 2))
-	,
+	{
+		hist(lib.factors, breaks=200, xlim=c(0, 2))
+	},
 	file = insert(pdf.fn, c("qc", "lib-factors"))
 );
 
 qdraw(
-	with(colData(x),
-		smoothScatter(detected, subsets_mito_percent, ylim=c(0, 20))
-	),
+	{
+		with(colData(x),
+			smoothScatter(detected, subsets_mito_percent, ylim=c(0, 20))
+		)
+	},
 	file = insert(pdf.fn, c("qc", "detected", "mito-pct"))
 );
 
