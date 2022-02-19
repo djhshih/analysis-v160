@@ -154,14 +154,14 @@ rds.fn <- insert(out.fn, ext="rds");
 csv.fn <- insert(out.fn, ext="csv");
 pdf.fn <- insert(out.fn, ext="pdf");
 
+sca <- qread(in.fn);
+
 # ignore TCR variable genes
 genes.tcrv <- grep("^TR(A|B|G)V[0-9]*", rownames(sca), value=TRUE);
 genes.ribo <- grep("^RP((LP)|L|S)[0-9]+[A-Z]?", rownames(sca), value=TRUE);
 genes.ignore <- c(genes.tcrv, genes.ribo);
 genes <- setdiff(rownames(sca), genes.ignore);
 
-
-sca <- qread(in.fn);
 
 zfit <- zlm(~ response, sca);
 qwrite(zfit, insert(rds.fn, "mast-zlm"));
@@ -332,7 +332,7 @@ qdraw(
 
 qwrite(
 	filter(d.b.durable, hurdle_q < csv.fdr.cut),
-	file = insert(pdf.fn, c("wd", "cluster2-b", "durable"))
+	file = insert(csv.fn, c("wd", "cluster2-b", "durable"))
 );
 
 
@@ -352,7 +352,7 @@ qdraw(
 
 qwrite(
 	filter(d.a.transient, hurdle_q < csv.fdr.cut),
-	file = insert(pdf.fn, c("wd", "cluster2-a", "transient"))
+	file = insert(csv.fn, c("wd", "cluster2-a", "transient"))
 );
 
 
@@ -395,7 +395,13 @@ qwrite(
 );
 
 
-# CD8+ durable vs. CD8+ nonresponsive
+# CD8+ durable vs. CD8+ nonresponsive: meaningful
+# PGAM1, GAPDH, PKM
+# GZMB
+# IFNG, XCL1, XCL2, CCL4L2, CCL4
+
+sca.cd8 <- sca[, which(colData(sca)$t_cell == "CD8")];
+zfit.cd8 <- zlm(~ response, sca.cd8);
 
 wd.cd8.durable <- waldTest(zfit.cd8, Hypothesis("responsedurable", c("(Intercept)", "responsedurable")));
 logfc.cd8.durable <- gene_logfc(sca.cd8, factor(colData(sca.cd8)$response, c("nonresponsive", "durable")));
@@ -420,7 +426,8 @@ qwrite(
 );
 
 
-# CD4+ transient vs. CD4+ nonresponsive: nothing
+# CD4+ transient vs. CD4+ nonresponsive: nothing interesting
+# IL4I1, SRPK2, TNFRSF18
 
 sca.cd4 <- sca[, which(colData(sca)$t_cell == "CD4")];
 zfit.cd4 <- zlm(~ response, sca.cd4);
@@ -451,7 +458,11 @@ qwrite(
 );
 
 
-# CD8+ durable vs. CD8+ transient
+# CD8+ durable vs. CD8+ transient: meaningful
+# PGAM, PKM, GAPDH
+# NKG7, KLRD1
+# CCL4, CCL5
+# RACK1-
 
 sca.cd8 <- sca[, which(colData(sca)$t_cell == "CD8")];
 zfit.cd8 <- zlm(~ response, sca.cd8);
@@ -479,7 +490,7 @@ qwrite(
 );
 
 
-# CD8+ durable non-C vs. CD8+ transient non-C
+# CD8+ durable non-C vs. CD8+ transient non-C: nothing
 
 sca.cd8.nonc <- sca[, which(colData(sca)$t_cell == "CD8" & colData(sca)$cluster2 != "C")];
 zfit.cd8.nonc <- zlm(~ response, sca.cd8.nonc);
