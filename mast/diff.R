@@ -315,6 +315,11 @@ qwrite(
 	file = insert(csv.fn, c("wd", "cluster2-c", "durable"))
 )
 
+qwrite(
+	wd.c.durable,
+	file = insert(rds.fn, c("wd", "cluster2-c", "durable"))
+)
+
 
 # durable B vs. nonresponsive B: nothing
 
@@ -335,6 +340,11 @@ qwrite(
 	file = insert(csv.fn, c("wd", "cluster2-b", "durable"))
 );
 
+qwrite(
+	wd.b.durable,
+	file = insert(rds.fn, c("wd", "cluster2-b", "durable"))
+);
+
 
 # transient A vs. nonresponsive A: nothing
 
@@ -353,6 +363,11 @@ qdraw(
 qwrite(
 	filter(d.a.transient, hurdle_q < csv.fdr.cut),
 	file = insert(csv.fn, c("wd", "cluster2-a", "transient"))
+);
+
+qwrite(
+	wd.a.transient,
+	file = insert(rds.fn, c("wd", "cluster2-a", "transient"))
 );
 
 
@@ -394,6 +409,11 @@ qwrite(
 	file = insert(csv.fn, c("wd", "cd8", "durable", "c-vs-b"))
 );
 
+qwrite(
+	wd.durable.bc,
+	file = insert(rds.fn, c("wd", "cd8", "durable", "c-vs-b"))
+)
+
 
 # CD8+ durable vs. CD8+ nonresponsive: meaningful
 # PGAM1, GAPDH, PKM
@@ -423,6 +443,11 @@ qdraw(
 qwrite(
 	filter(d.cd8.durable, hurdle_q < csv.fdr.cut),
 	file = insert(csv.fn, c("wd", "cd8", "durable"))
+);
+
+qwrite(
+	wd.cd8.durable,
+	file = insert(rds.fn, c("wd", "cd8", "durable"))
 );
 
 
@@ -457,6 +482,11 @@ qwrite(
 	file = insert(csv.fn, c("wd", "cd4", "transient"))
 );
 
+qwrite(
+	wd.cd4.transient,
+	file = insert(rds.fn, c("wd", "cd4", "transient"))
+);
+
 
 # CD8+ durable vs. CD8+ transient: meaningful
 # PGAM, PKM, GAPDH
@@ -489,6 +519,11 @@ qwrite(
 	file = insert(csv.fn, c("wd", "cd8", "durable-vs-transient"))
 );
 
+qwrite(
+	wd.cd8.durable.t,
+	file = insert(rds.fn, c("wd", "cd8", "durable-vs-transient"))
+);
+
 
 # CD8+ durable non-C vs. CD8+ transient non-C: nothing
 
@@ -514,6 +549,11 @@ qdraw(
 qwrite(
 	filter(d.cd8.nonc.durable, hurdle_q < csv.fdr.cut),
 	file = insert(csv.fn, c("wd", "cd8", "non-c", "durable-vs-transient"))
+);
+
+qwrite(
+	wd.cd8.nonc.durable,
+	file = insert(rds.fn, c("wd", "cd8", "non-c", "durable-vs-transient"))
 );
 
 # ----
