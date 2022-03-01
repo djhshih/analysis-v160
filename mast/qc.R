@@ -52,7 +52,7 @@ out.fn <- filename("v160");
 rds.fn <- insert(out.fn, ext="rds");
 pdf.fn <- insert(out.fn, ext="pdf");
 
-barcode.d <- qread("../../tcr-profiling/tcr/merged/tcr_aggr_responsive_barcodes.csv");
+barcode.d <- qread("../tcr-seq/tcr/merged/tcr_aggr_responsive_barcodes.csv");
 
 x <- read10xCounts(file.path(indir, "filtered_feature_bc_matrix"));
 mcold <- DataFrame(rowData(x));
