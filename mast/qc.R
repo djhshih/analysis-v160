@@ -209,6 +209,7 @@ cl.b.cells <- 16;
 cl.dendritic <- c(4, 15);
 cl.remove <- c(cl.b.cells, cl.dendritic);
 x.p <- x.f[, ! cl.nn %in% cl.remove];
+cold <- colData(x.p);
 
 frac.expressed <- apply(logcounts(x.p), 1, function(z) mean(z > 1));
 summary(frac.expressed)
