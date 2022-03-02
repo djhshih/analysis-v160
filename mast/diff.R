@@ -6,7 +6,7 @@ library(dplyr)
 
 source("R/common.R")
 
-options(mc.cores=128);
+options(mc.cores=50);
 
 set.seed(1337);
 
