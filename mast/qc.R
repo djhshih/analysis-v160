@@ -433,7 +433,7 @@ qdraw(
 );
 
 # join barcode data
-cold <- left_join(cold, barcode.d, by=c("Barcode"="barcode"));
+cold <- left_join(as.data.frame(cold), barcode.d, by=c("Barcode"="barcode"));
 cold$response[is.na(cold$response)] <- "nonresponsive";
 cold$response <- factor(cold$response, levels.response);
 
