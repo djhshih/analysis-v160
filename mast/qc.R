@@ -276,7 +276,6 @@ print(lapply(markers.p.sel, function(x) as.data.frame(head(x[, 1:4], 20))))
 
 top.n <- markers.p.sel
 
-with(cold, prop.table(table(tmem_subset, cluster), margin=2))
 
 # T-bet (TBX21)
 gsets.to.plot <- list(
@@ -434,7 +433,7 @@ qdraw(
 );
 
 # join barcode data
-cold <- left_join(as.data.frame(colData(x.p)), barcode.d, by=c("Barcode"="barcode"));
+cold <- left_join(cold, barcode.d, by=c("Barcode"="barcode"));
 cold$response[is.na(cold$response)] <- "nonresponsive";
 cold$response <- factor(cold$response, levels.response);
 
@@ -467,7 +466,6 @@ gset_score(x.p, th1.gset)
 cold$th1 <- gset_score(x.p, th1.gset);
 cold$th2 <- gset_score(x.p, th2.gset);
 
-colData(x.p) <- DataFrame(cold);
 
 # Given cateogorical variables x and y,
 # estimate proportions of each level of y within each level of x
@@ -502,11 +500,11 @@ proportions <- function(x, y) {
 }
 
 
-enrich_test <- function(d, alternative="greater") {
+enrich_test <- function(d, alternative="greater", group.var="group") {
 	c01 <- sum(d$x);
 	c00 <- sum(d$n) - c01;
 
-	ds <- split(d, factor(d$group, levels=unique(d$group)));
+	ds <- split(d, factor(d[[group.var]], levels=unique(d[[group.var]])));
 	hs <- lapply(ds,
 		function(d) {
 			c11 <- sum(d$x);
@@ -516,9 +514,11 @@ enrich_test <- function(d, alternative="greater") {
 		}
 	);
 
-	stopifnot(d$group == names(hs))
+	stopifnot(d[[group.var]] == names(hs))
 
-	d$group <- factor(d$group, levels=unique(d$group));
+	if (!is.factor(d[[group.var]])) {
+		d[[group.var]] <- factor(d[[group.var]], levels=unique(d[[group.var]]));
+	}
 	
 	d2 <- data.frame(
 		d,
@@ -679,13 +679,12 @@ qdraw(
 
 ####
 
-cold0 <- cold;
+colData(x.p) <- DataFrame(cold);
 
 # convert to SingellCellAssay for use with MAST
 sca <- SceToSingleCellAssay(x.p);
 cold <- colData(sca);
 mcold <- data.table::as.data.table(mcols(sca));
-
 
 # --- T cells
 
@@ -872,6 +871,10 @@ qdraw(
 	file = insert(pdf.fn, c("prop", "t-cell", "response-type"))
 )
 
+colData(sca) <- DataFrame(cold);
+colData(x.p) <- DataFrame(cold);
+
+
 # ---
 
 tmem.clf <- qread("../data/etabm40_pamr.rds");
@@ -897,6 +900,8 @@ with(cold, table(tmem_subset))
 table(colData(x.p.cd8)$response, x.p.cd8.tmem.cl)
 with(cold, table(response, tmem_subset, t_cell))
 
+with(cold, prop.table(table(tmem_subset, cluster), margin=2))
+
 tmem.ct <- table(colData(x.p.cd8)$response, x.p.cd8.tmem.cl);
 tmem.ct
 prop.table(tmem.ct, margin=1)
@@ -912,18 +917,20 @@ x.p.cd8.tmem.prop <-
 
 lapply(tmem.levels,
 	function(v) {
-		enrich_test(filter(x.p.cd8.tmem.prop, value == v,
-			group %in% c("nonresponsive", "transient")),
-			alternative = "two.sided"
+		enrich_test(filter(x.p.cd8.tmem.prop, tmem_subset == v,
+			response %in% c("nonresponsive", "transient")),
+			alternative = "two.sided",
+			group.var = "response"
 		)
 	}
 )
 
 lapply(tmem.levels,
 	function(v) {
-		enrich_test(filter(x.p.cd8.tmem.prop, value == v,
-			group %in% c("nonresponsive", "durable")),
-			alternative = "two.sided"
+		enrich_test(filter(x.p.cd8.tmem.prop, tmem_subset == v,
+			response %in% c("nonresponsive", "durable")),
+			alternative = "two.sided",
+			group.var = "response"
 		)
 	}
 )
