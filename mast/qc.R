@@ -226,7 +226,7 @@ x.p <- denoisePCA(x.p, dec.p, subset.row=tcell.gset.idx);
 cl.nn <- clusterCells(x.p, use.dimred = "PCA", BLUSPARAM = bluster::NNGraphParam(cluster.fun="louvain", k=15));
 #cl.nn <- clusterCells(x.p, use.dimred = "PCA", BLUSPARAM = bluster::NNGraphParam());
 colLabels(x.p) <- factor(cl.nn);
-cold$cluster <- cold$label;
+cold$cluster <- factor(cl.nn);
 cold$cluster_sel <- cold$label;
 cl.sel <- c("5", "9", "7", "11");
 cold$cluster_sel[! cold$cluster %in% cl.sel] <- NA;
@@ -465,6 +465,8 @@ gset_score(x.p, th1.gset)
 
 cold$th1 <- gset_score(x.p, th1.gset);
 cold$th2 <- gset_score(x.p, th2.gset);
+
+colData(x.p) <- DataFrame(cold);
 
 
 # Given cateogorical variables x and y,
@@ -1043,7 +1045,7 @@ qdraw(
 );
 
 
-x.rsel <- x.p[, cold$cluster %in% cl.sel & cold$response != "nonresponsive"];
+x.rsel <- x.p[, as.character(cold$cluster) %in% cl.sel & cold$response != "nonresponsive"];
 dec.rsel <- modelGeneVar(x.rsel);
 x.rsel <- denoisePCA(x.rsel, dec.rsel, subset.row=tcell.gset.idx);
 x.rsel <- runUMAP(x.rsel, dimred="PCA");
