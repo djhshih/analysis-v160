@@ -13,7 +13,7 @@ library(dplyr)
 
 source("R/common.R")
 
-options(mc.cores=120)
+options(mc.cores=50)
 
 
 
