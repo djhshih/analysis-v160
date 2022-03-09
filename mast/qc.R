@@ -52,9 +52,18 @@ out.fn <- filename("v160");
 rds.fn <- insert(out.fn, ext="rds");
 pdf.fn <- insert(out.fn, ext="pdf");
 
+aggr.annot <- qread("../aggr/5p/pt26/outs/aggregation.csv");
 barcode.d <- qread("../tcr-seq/tcr/merged/tcr_aggr_responsive_barcodes.csv");
+tcr.contigs.d <- qread("../aggr/tcr/pt26/outs/vdj_t/filtered_contig_annotations.csv");
 
 x <- read10xCounts(file.path(indir, "filtered_feature_bc_matrix"));
+
+colData(x)$treatment <- factor(gsub(".*-", "", colData(x)$Barcode), labels=aggr.annot$sample_id);
+colData(x)$treatment <- factor(colData(x)$treatment, levels=c("Ctrl", "IE1"), labels=c("IFN-gamma-", "IFN-gamma+"));
+
+tcr.idx <- match(colData(x)$Barcode, tcr.contigs.d$barcode);
+colData(x)$clonotype_id <- tcr.contigs.d$raw_clonotype_id[tcr.idx];
+
 mcold <- DataFrame(rowData(x));
 
 # sort by ensembl ID
@@ -211,6 +220,9 @@ cl.remove <- c(cl.b.cells, cl.dendritic);
 x.p <- x.f[, ! cl.nn %in% cl.remove];
 cold <- colData(x.p);
 
+#tcr.idx <- match(colData(x.p)$Barcode, tcr.contigs.d$barcode);
+#colData(x.p)$clonotype_id <- tcr.contigs.d$raw_clonotype_id[tcr.idx];
+
 frac.expressed <- apply(logcounts(x.p), 1, function(z) mean(z > 1));
 summary(frac.expressed)
 features.expressed <- rownames(x.p)[frac.expressed > 0.05];
@@ -226,8 +238,9 @@ x.p <- denoisePCA(x.p, dec.p, subset.row=tcell.gset.idx);
 cl.nn <- clusterCells(x.p, use.dimred = "PCA", BLUSPARAM = bluster::NNGraphParam(cluster.fun="louvain", k=15));
 #cl.nn <- clusterCells(x.p, use.dimred = "PCA", BLUSPARAM = bluster::NNGraphParam());
 colLabels(x.p) <- factor(cl.nn);
+cold$label <- factor(cl.nn);
 cold$cluster <- factor(cl.nn);
-cold$cluster_sel <- cold$label;
+cold$cluster_sel <- factor(cl.nn);
 cl.sel <- c("5", "9", "7", "11");
 cold$cluster_sel[! cold$cluster %in% cl.sel] <- NA;
 
@@ -574,6 +587,20 @@ qdraw(
 	file = insert(pdf.fn, c("pruned", "tsne", "detected"))
 );
 
+
+clonotypes <- paste0("clonotype", 1:2);
+
+for (clonotype in clonotypes) {
+	colData(x.p)[[clonotype]] <- colData(x.p)$clonotype_id == clonotype;
+	qdraw(
+		mod_rd_plot(plotTSNE(x.p[, order(colData(x.p)[[clonotype]], na.last=FALSE)], colour_by=clonotype)) +
+			scale_colour_manual(na.value="grey90", values=c("FALSE"="grey60", "TRUE"="firebrick"), name=clonotype)
+		,
+		width = 6, height = 6,
+		file = insert(pdf.fn, c("pruned", "tsne", clonotype))
+	);
+}
+
 qdraw(
 	mod_rd_plot(plotTSNE(x.p[, order(colData(x.p)$response)], colour_by="response")) + 
 		scale_colour_manual(values=cols.response),
@@ -582,13 +609,30 @@ qdraw(
 );
 
 qdraw(
-	mod_rd_plot(plotTSNE(x.p[, order(colData(x.p)$th1)], colour_by="th1")),
+	mod_rd_plot(plotTSNE(x.p, colour_by="response")) +
+	#mod_rd_plot(plotTSNE(x.p[, order(colData(x.p)$response)], colour_by="response")) + 
+		scale_colour_manual(values=cols.response) +
+		facet_wrap(colData(x.p)$treatment, nrow=1)
+	,
+	width = 12, height = 6,
+	file = insert(pdf.fn, c("pruned", "tsne", "treatment"))
+);
+
+
+colData(x.p)$is_th1 <- colData(x.p)$th1 > 0;
+qdraw(
+	mod_rd_plot(plotTSNE(x.p[, order(colData(x.p)$th1)], colour_by="is_th1")) +
+		scale_colour_manual(na.value="grey90", values=c("FALSE"="grey80", "TRUE"="green4"), name="Th1")
+	,
 	width = 6, height = 6,
 	file = insert(pdf.fn, c("pruned", "tsne", "th1"))
 );
 
+colData(x.p)$is_th2 <- colData(x.p)$th2 > 0;
 qdraw(
-	mod_rd_plot(plotTSNE(x.p[, order(colData(x.p)$th2)], colour_by="th2")),
+	mod_rd_plot(plotTSNE(x.p[, order(colData(x.p)$th2)], colour_by="is_th2")) +
+		scale_colour_manual(na.value="grey90", values=c("FALSE"="grey80", "TRUE"="green4"), name="Th2")
+	,
 	width = 6, height = 6,
 	file = insert(pdf.fn, c("pruned", "tsne", "th2"))
 );
@@ -1051,7 +1095,7 @@ x.rsel <- denoisePCA(x.rsel, dec.rsel, subset.row=tcell.gset.idx);
 x.rsel <- runUMAP(x.rsel, dimred="PCA");
 
 qdraw(
-	mod_rd_plot(plotUMAP(x.rsel, colour_by="response", shape_by="t_cell")) +
+	mod_rd_plot(plotUMAP(x.rsel, colour_by="response", text_by="t_cell")) +
 		scale_colour_manual(values=cols.response)
 	,
 	width = 6, height = 6,
@@ -1097,7 +1141,7 @@ qdraw(
 
 qdraw(
 	mod_rd_plot(plotUMAP(x.sel.reordered,
-		colour_by="response", shape_by="t_cell")) +
+		colour_by="response", text_by="cluster2")) +
 		scale_colour_manual(values=cols.response)
 	,
 	width = 6, height = 6,
@@ -1157,7 +1201,7 @@ qdraw(
 );
 
 qdraw(
-	mod_rd_plot(plotUMAP(x.sel, colour_by="t_cell", shape_by="t_cell")) +
+	mod_rd_plot(plotUMAP(x.sel, colour_by="t_cell", text_by="cluster2")) +
 		scale_colour_npg()
 	,
 	width = 6, height = 6,
