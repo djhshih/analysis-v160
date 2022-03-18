@@ -13,7 +13,7 @@ library(ggsci)
 library(bluster)
 
 
-source("R/common.R")
+source("../R/common.R")
 
 
 options(mc.cores=100);
