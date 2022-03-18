@@ -4,7 +4,7 @@ library(ggplot2)
 library(ggrepel)
 library(dplyr)
 
-source("R/common.R")
+source("../R/common.R")
 
 options(mc.cores=50);
 
@@ -31,10 +31,22 @@ wd_summary_table <- function(wd, logfc, genes=NULL) {
 	d <- data.frame(
 		gene = rownames(wd),
 		logfc = logfc,
+		discrete_wald = wd[, "disc", "lambda"],
+		continuous_wald = wd[, "cont", "lambda"],
+		hurdle_wald = wd[, "hurdle", "lambda"],
 		discrete_p = wd[, "disc", "Pr(>Chisq)"],
 		continuous_p = wd[, "cont", "Pr(>Chisq)"],
 		hurdle_p = wd[, "hurdle", "Pr(>Chisq)"]
 	);
+
+	# convert Wald statistic to signed Wald statistic
+	wald_to_swald <- function(w, logfc) {
+		sign(logfc) * sqrt(w)
+	}
+
+	d$discrete_swald <- wald_to_swald(d$discrete_wald, logfc);
+	d$continuous_swald <- wald_to_swald(d$continuous_wald, logfc);
+	d$hurdle_swald <- wald_to_swald(d$hurdle_wald, logfc);
 
 	if (!is.null(genes)) {
 		d <- d[match(genes, d$gene), ];
@@ -184,6 +196,8 @@ coefs <- coefs[contrast != "(Intercept)", ];
 lr <- lrTest(zfit, "response");
 qwrite(lr, insert(rds.fn, "mast-zlm-lr"));
 
+# ----
+
 wd.durable <- waldTest(zfit, Hypothesis("responsedurable", c("(Intercept)", "responsedurable")));
 wd.transient <- waldTest(zfit, Hypothesis("responsetransient", c("(Intercept)", "responsetransient")));
 wd.durable.vs.transient <- waldTest(zfit, Hypothesis("responsedurable-responsetransient", c("responsetransient", "responsedurable")));
@@ -316,7 +330,7 @@ qwrite(
 )
 
 qwrite(
-	wd.c.durable,
+	d.c.durable,
 	file = insert(rds.fn, c("wd", "cluster2-c", "durable"))
 )
 
@@ -341,7 +355,7 @@ qwrite(
 );
 
 qwrite(
-	wd.b.durable,
+	d.b.durable,
 	file = insert(rds.fn, c("wd", "cluster2-b", "durable"))
 );
 
@@ -366,9 +380,18 @@ qwrite(
 );
 
 qwrite(
-	wd.a.transient,
+	d.a.transient,
 	file = insert(rds.fn, c("wd", "cluster2-a", "transient"))
 );
+
+
+sca.cd8.durable <- sca[,
+	which(
+		colData(sca)$t_cell == "CD8" &
+		colData(sca)$response == "durable"
+	)
+];
+with(colData(sca.cd8), table(response, cluster2))
 
 
 # CD8+ durable C vs. CD8+ durable B: many differentially expressed genes
@@ -377,18 +400,23 @@ qwrite(
 # HSP90AB1, HSPA8
 # GNAS, BCL2A1, EIF4A1
 
-sca.durable.bc <- sca[,
+sca.cd8.durable.bc <- sca[,
 	which(
 		colData(sca)$t_cell == "CD8" &
 		colData(sca)$response == "durable" & 
 		colData(sca)$cluster2 %in% c("B", "C")
 	)
 ];
-with(colData(sca.durable.bc), table(response, cluster2))
-colData(sca.durable.bc)$cluster2 <- factor(colData(sca.durable.bc)$cluster2, levels=c("B", "C"));
-zfit.durable.bc <- zlm(~ cluster2, sca.durable.bc);
+with(colData(sca.cd8.durable.bc), table(response, cluster2))
+colData(sca.cd8.durable.bc)$cluster2 <- factor(colData(sca.cd8.durable.bc)$cluster2, levels=c("B", "C"));
+zfit.durable.bc <- zlm(~ cluster2, sca.cd8.durable.bc);
+qwrite(
+	zfit.durable.bc,
+	file = insert(rds.fn, c("cd8", "durable", "mast-zlm", "c-vs-b"))
+)
+
 wd.durable.bc <- waldTest(zfit.durable.bc, Hypothesis("cluster2C", c("(Intercept)", "cluster2C")));
-logfc.durable.bc <- gene_logfc(sca.durable.bc, factor(colData(sca.durable.bc)$cluster2, c("B", "C")));
+logfc.durable.bc <- gene_logfc(sca.cd8.durable.bc, factor(colData(sca.cd8.durable.bc)$cluster2, c("B", "C")));
 d.durable.bc <- wd_summary_table(wd.durable.bc, logfc.durable.bc, genes);
 
 qdraw(
@@ -410,7 +438,7 @@ qwrite(
 );
 
 qwrite(
-	wd.durable.bc,
+	d.durable.bc,
 	file = insert(rds.fn, c("wd", "cd8", "durable", "c-vs-b"))
 )
 
@@ -422,6 +450,10 @@ qwrite(
 
 sca.cd8 <- sca[, which(colData(sca)$t_cell == "CD8")];
 zfit.cd8 <- zlm(~ response, sca.cd8);
+qwrite(
+	zfit.cd8,
+	file = insert(rds.fn, c("cd8", "mast-zlm"))
+)
 
 wd.cd8.durable <- waldTest(zfit.cd8, Hypothesis("responsedurable", c("(Intercept)", "responsedurable")));
 logfc.cd8.durable <- gene_logfc(sca.cd8, factor(colData(sca.cd8)$response, c("nonresponsive", "durable")));
@@ -446,7 +478,7 @@ qwrite(
 );
 
 qwrite(
-	wd.cd8.durable,
+	d.cd8.durable,
 	file = insert(rds.fn, c("wd", "cd8", "durable"))
 );
 
@@ -456,6 +488,10 @@ qwrite(
 
 sca.cd4 <- sca[, which(colData(sca)$t_cell == "CD4")];
 zfit.cd4 <- zlm(~ response, sca.cd4);
+qwrite(
+	zfit.cd4,
+	file = insert(rds.fn, c("cd4", "mast-zlm"))
+)
 
 wd.cd4.transient <- waldTest(zfit.cd4, Hypothesis("responsetransient", c("(Intercept)", "responsetransient")));
 logfc.cd4.transient <- gene_logfc(sca.cd4, factor(colData(sca.cd4)$response, c("nonresponsive", "transient")));
@@ -483,7 +519,7 @@ qwrite(
 );
 
 qwrite(
-	wd.cd4.transient,
+	d.cd4.transient,
 	file = insert(rds.fn, c("wd", "cd4", "transient"))
 );
 
@@ -494,8 +530,9 @@ qwrite(
 # CCL4, CCL5
 # RACK1-
 
-sca.cd8 <- sca[, which(colData(sca)$t_cell == "CD8")];
-zfit.cd8 <- zlm(~ response, sca.cd8);
+# already previously run
+#sca.cd8 <- sca[, which(colData(sca)$t_cell == "CD8")];
+#zfit.cd8 <- zlm(~ response, sca.cd8);
 
 wd.cd8.durable.t <- waldTest(zfit.cd8, Hypothesis("responsedurable-responsetransient", c("responsetransient", "responsedurable")));
 logfc.cd8.durable.t <- gene_logfc(sca.cd8, factor(colData(sca.cd8)$response, c("transient", "durable")));
@@ -520,7 +557,7 @@ qwrite(
 );
 
 qwrite(
-	wd.cd8.durable.t,
+	d.cd8.durable.t,
 	file = insert(rds.fn, c("wd", "cd8", "durable-vs-transient"))
 );
 
@@ -529,6 +566,7 @@ qwrite(
 
 sca.cd8.nonc <- sca[, which(colData(sca)$t_cell == "CD8" & colData(sca)$cluster2 != "C")];
 zfit.cd8.nonc <- zlm(~ response, sca.cd8.nonc);
+
 wd.cd8.nonc.durable <- waldTest(zfit.cd8.nonc, Hypothesis("responsedurable-responsetransient", c("responsetransient", "responsedurable")));
 logfc.cd8.nonc.durable <- gene_logfc(sca.cd8.nonc, factor(colData(sca.cd8.nonc)$response, c("transient", "durable")));
 d.cd8.nonc.durable <- wd_summary_table(wd.cd8.nonc.durable, logfc.cd8.nonc.durable, genes);
@@ -552,7 +590,7 @@ qwrite(
 );
 
 qwrite(
-	wd.cd8.nonc.durable,
+	d.cd8.nonc.durable,
 	file = insert(rds.fn, c("wd", "cd8", "non-c", "durable-vs-transient"))
 );
 
