@@ -385,14 +385,6 @@ qwrite(
 );
 
 
-sca.cd8.durable <- sca[,
-	which(
-		colData(sca)$t_cell == "CD8" &
-		colData(sca)$response == "durable"
-	)
-];
-with(colData(sca.cd8), table(response, cluster2))
-
 
 # CD8+ durable C vs. CD8+ durable B: many differentially expressed genes
 # GZMB, XCL1, XCL2, CCL4, CCL4L2
@@ -450,6 +442,8 @@ qwrite(
 
 sca.cd8 <- sca[, which(colData(sca)$t_cell == "CD8")];
 zfit.cd8 <- zlm(~ response, sca.cd8);
+summary(coef(zfit.cd8, "C"))
+summary(coef(zfit.cd8, "D"))
 qwrite(
 	zfit.cd8,
 	file = insert(rds.fn, c("cd8", "mast-zlm"))
@@ -481,6 +475,46 @@ qwrite(
 	d.cd8.durable,
 	file = insert(rds.fn, c("wd", "cd8", "durable"))
 );
+
+
+# Compare durable cells of cluster B or C to other CD8 T cells
+
+with(colData(sca.cd8), table(cluster, cluster2))
+# cluster2 B == cluster 7
+# cluster2 C == cluster 11
+with(colData(sca.cd8), table(response, cluster))
+
+with(colData(sca), table(response, cluster2, useNA="always"))
+with(colData(sca.cd8), table(response, cluster2, useNA="always"))
+
+colData(sca.cd8)$durableB <- 0;
+idx <- colData(sca.cd8)$response == "durable" & colData(sca.cd8)$cluster2 == "B";
+colData(sca.cd8)$durableB[idx] <- 1;
+with(colData(sca.cd8), table(durableB))
+
+colData(sca.cd8)$durableC <- 0;
+idx <- colData(sca.cd8)$response == "durable" & colData(sca.cd8)$cluster2 == "C";
+colData(sca.cd8)$durableC[idx] <- 1;
+with(colData(sca.cd8), table(durableC))
+
+# NB We could not fit a variable that partitions the cells into (B, C, other),
+#    likely because the durableB and the durableC are colinear
+
+zfit.cd8.durableb <- zlm(~ durableB, sca.cd8);
+summary(coef(zfit.cd8.durableb, "C"))
+summary(coef(zfit.cd8.durableb, "D"))
+qwrite(
+	zfit.cd8.durableb,
+	file = insert(rds.fn, c("cd8", "mast-zlm", "durable-b"))
+)
+
+zfit.cd8.durablec <- zlm(~ durableC, sca.cd8);
+summary(coef(zfit.cd8.durablec, "C"))
+summary(coef(zfit.cd8.durablec, "D"))
+qwrite(
+	zfit.cd8.durablec,
+	file = insert(rds.fn, c("cd8", "mast-zlm", "durable-c"))
+)
 
 
 # CD4+ transient vs. CD4+ nonresponsive: nothing interesting
