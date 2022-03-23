@@ -628,5 +628,3 @@ qwrite(
 	file = insert(rds.fn, c("wd", "cd8", "non-c", "durable-vs-transient"))
 );
 
-# ----
-
