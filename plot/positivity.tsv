@@ -1,0 +1,13 @@
+group	antigen	tcell	positive	total
+2-dose	IE-1	CD4	3	7
+2-dose	IE-1	CD8	4	7
+2-dose	pp65	CD4	4	7
+2-dose	pp65	CD8	3	7
+3-dose	IE-1	CD4	0	5
+3-dose	IE-1	CD8	4	5
+3-dose	pp65	CD4	3	5
+3-dose	pp65	CD8	3	5
+CMV+	IE-1	CD4	0	7
+CMV+	IE-1	CD8	5	7
+CMV+	pp65	CD4	3	7
+CMV+	pp65	CD8	5	7
