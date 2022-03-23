@@ -153,7 +153,7 @@ pathways.f <- c(
 	glycolysis = "Glycolysis",
 	e2f = "E2F targets",
 	ifna = "Interferon alpha response",
-	ifng <- "Interferon gamma response"
+	ifng = "Interferon gamma response"
 );
 
 gset.name <- "hallmark";
@@ -192,6 +192,7 @@ qdraw(
 
 pathways.sig <- gsea.diff.h.z$pathway[gsea.diff.h.z$padj < fdr.cut];
 pathways <- intersect(pathways.f, pathways.sig);
+names(pathways) <- names(pathways.f)[match(pathways, pathways.f)];
 
 for (i in 1:length(pathways)) {
 	pathway <- pathways[i];
@@ -250,6 +251,7 @@ qdraw(
 
 pathways.sig <- gsea.h.z$pathway[gsea.h.z$padj < fdr.cut];
 pathways <- intersect(pathways.f, pathways.sig);
+names(pathways) <- names(pathways.f)[match(pathways, pathways.f)];
 
 for (i in 1:length(pathways)) {
 	pathway <- pathways[i];
@@ -288,4 +290,38 @@ qdraw(
 	width=6, height=4,
 	file=insert(pdf.fn, c("c-vs-b", gset.name))
 );
+
+
+# ---
+
+sce <- qread("v160_sce.rds");
+
+out.fn <- filename("v160", tag=c("expr", "response2"));
+pdf.fn <- insert(out.fn, ext="pdf");
+
+idx <- colData(sce)$t_cell == "CD8" & colData(sce)$response %in% c("transient", "durable") &
+	(!is.na(colData(sce)$cluster2) | colData(sce)$response == "transient");
+sce.sel <- sce[, idx];
+
+with(colData(sce.sel), table(response, cluster2, useNA="always"))
+colData(sce.sel)$group <- factor(NA, levels=c("transient", "durable B", "durable C"));
+colData(sce.sel)$group[colData(sce.sel)$response == "transient"] <- "transient";
+colData(sce.sel)$group[colData(sce.sel)$response == "durable" & colData(sce.sel)$cluster2 == "B"] <- "durable B";
+colData(sce.sel)$group[colData(sce.sel)$response == "durable" & colData(sce.sel)$cluster2 == "C"] <- "durable C";
+
+cols.response2 <- c(nonresponsive="grey60", transient="#DF8F44", "durable B"="#00C2CC" , "durable C"="#0073D1");
+
+genes <- c(
+	"CCL4", "CCL5", "XCL1", "XCL2", "IFNG", "GZMB", "PGAM1",
+	"MAP2K3", "SLC7A5", "NAMPT", "M6PR",
+	"IRF1", "RIPK2", "GBP4", "CASP8"
+);
+
+for (gene in genes) {
+	qdraw(
+		gene_expr_plot(sce.sel, gene, "group", cols = cols.response2),
+		width = 1.25, height = 4,
+		file = insert(pdf.fn, c("gene", tolower(gene)))
+	)
+}
 
