@@ -7,7 +7,15 @@ group	antigen	tcell	positive	total
 3-dose	IE-1	CD8	4	5
 3-dose	pp65	CD4	3	5
 3-dose	pp65	CD8	3	5
+Placebo	IE-1	CD4	0	4
+Placebo	IE-1	CD8	0	4
+Placebo	pp65	CD4	0	4
+Placebo	pp65	CD8	0	4
 CMV+	IE-1	CD4	0	7
 CMV+	IE-1	CD8	5	7
 CMV+	pp65	CD4	3	7
 CMV+	pp65	CD8	5	7
+CMV-	IE-1	CD4	0	4
+CMV-	IE-1	CD8	0	4
+CMV-	pp65	CD4	0	4
+CMV-	pp65	CD8	0	4
