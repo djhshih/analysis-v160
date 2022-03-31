@@ -1,3 +1,11 @@
+levels.response <- c("nonresponsive", "transient", "durable");
+
+library(ggsci)
+cols.response <- pal_jama()(3);
+names(cols.response) <- levels.response;
+
+# ---
+
 bound <- function(xs, lim) {
 	lower <- min(lim);
 	upper <- max(lim);
@@ -16,12 +24,6 @@ revlog_trans <- function(base = 10) {
 		domain = c(1e-100, Inf)
 	)
 }
-
-levels.response <- c("nonresponsive", "transient", "durable");
-
-library(ggsci)
-cols.response <- pal_jama()(3);
-names(cols.response) <- levels.response;
 
 capitalize <- function(s) {
 	ifelse(is.na(s),
